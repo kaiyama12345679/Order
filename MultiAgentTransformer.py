@@ -62,7 +62,6 @@ class MultiAgentTransformer(nn.Module):
 
         self.encoder = Encoder(n_dim, n_head, obs_dim, num_layer_encoder).to(device)
         self.decoder = Decoder(n_dim, n_head, action_dim, num_layer_decoder).to(device)
-        self.ordered_encoder = OrderedEncoder(n_dim).to(device)
 
         self.optimizer = optim.Adam(self.parameters(), lr=lr, eps=eps)
         self.gamma = gamma
@@ -138,7 +137,7 @@ class MultiAgentTransformer(nn.Module):
             order = order_seq
         
 
-        ordered_enc_state = self.ordered_encoder(hidden_state, ordered_state)
+        ordered_enc_state = ordered_state
 
         order_logprobs = torch.zeros((n_env, n_agent, 1)).to(state_seq.device)
 
