@@ -14,9 +14,6 @@ from buffer import EpisodeBuffer
 from collections import defaultdict
 import subprocess
 from harl.utils.envs_tools import *
-import logging
-logging.disable(logging.FATAL)
-
 def get_current_branch(repository_dir="./") -> str:
     """
     get current branch name
@@ -62,7 +59,7 @@ def evaluation(
         for env_id, done in enumerate(dones):
             if done[0] and "battle_won" in infos[env_id][0]:
                 # Finish one episode
-                print(f"Eval [{env_id}]: info: {infos[env_id]}")
+                print(f"Eval [{env_id}]: info: {infos[env_id][0]['battle_won']}")
                 for key in [
                     "battle_won",
                     "dead_allies",
