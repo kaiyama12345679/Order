@@ -103,7 +103,6 @@ class EpisodeBuffer(object):
         order_logprob,
         reward,
         done,
-        truncateds,
         value_preds,
     ):
         if self.is_full():
@@ -119,9 +118,9 @@ class EpisodeBuffer(object):
         # Done has information for each agent. Alive: 0.0, Die: 1.0
         # So 1.0 - Done will give you active masks
         # TODO: Check if active mask should be False if truncated == True?
-        self.active_masks[self.counter] = 1.0 - done
+        self.active_masks[self.counter] = 1.0 - done.unsqueeze(-1)
         # Here truncated is used as done flag
-        self.dones[self.counter] = truncateds.expand(-1, self.n_agents, -1)
+        self.dones[self.counter] = done.unsqueeze(-1)
         self.value_preds[self.counter] = value_preds
 
         # Counter add
