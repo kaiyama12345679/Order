@@ -320,7 +320,7 @@ def main(args):
         if args.track:
             wandb.finish()
         if not debug:
-            model.save_model(save_dir + data["map_name"])
+            model.save_model(save_dir)
             with open(save_dir + "train.yaml", "w") as f:
                 yaml.safe_dump(data, f)
 
