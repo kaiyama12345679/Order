@@ -44,7 +44,7 @@ def evaluation(
     obs, action_mask = env.reset()
     while len(eval_info["battle_won"]) < n_eval:
         with torch.no_grad():
-            action, action_logps, entropy, values = model.get_action_and_value(
+            action, action_logps, entropy, order, order_logps, order_entropy, values = model.get_action_and_value(
                 torch.tensor(obs, dtype=torch.float32, device=device),
                 torch.tensor(action_mask, dtype=torch.int32, device=device),
                 deterministic=True,
@@ -186,7 +186,7 @@ def main(args):
             rollout_info = defaultdict(list)
             while not eps_buffer.is_full():
                 with torch.no_grad():
-                    action, action_logps, entropy, values = model.get_action_and_value(
+                    action, action_logps, entropy, order, order_logps, order_entropy, values = model.get_action_and_value(
                         torch.tensor(obs, dtype=torch.float32, device=device),
                         torch.tensor(action_mask, dtype=torch.int32, device=device),
                         deterministic=False,
@@ -217,6 +217,8 @@ def main(args):
                     action,
                     torch.tensor(action_mask, dtype=torch.int32, device=device),
                     action_logps,
+                    order,
+                    order_logps,
                     torch.tensor(reward, dtype=torch.float32, device=device),
                     torch.tensor(done, dtype=torch.float32, device=device),
                     torch.tensor(truncateds, dtype=torch.float32, device=device),
@@ -301,8 +303,8 @@ def main(args):
 
             if update % 500 == 0:
                 # Save checkpoint
-                model.save_model(save_dir + f"{data['map_name']}-episode-{update}")
-
+                if not debug:
+                    model.save_model(save_dir + f"{data['map_name']}-episode-{update}")
     finally:
         env.close()
         if args.track:

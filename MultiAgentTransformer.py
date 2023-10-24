@@ -4,9 +4,10 @@ import torch.nn.functional as F
 import torch.optim as optim
 import numpy as np
 from torch.distributions import Categorical
-from networks import Encoder, Decoder
+from networks import Encoder, Decoder, Pointer, OrderedEncoder, positional_encoding
 from buffer import Transition
 from valuenorm import ValueNorm
+import math
 
 
 class MultiAgentTransformer(nn.Module):
@@ -61,9 +62,10 @@ class MultiAgentTransformer(nn.Module):
 
         self.encoder = Encoder(n_dim, n_head, obs_dim, num_layer_encoder).to(device)
         self.decoder = Decoder(n_dim, n_head, action_dim, num_layer_decoder).to(device)
+        self.pointer = Pointer(n_dim=n_dim).to(device)
+        self.ordered_encoder = OrderedEncoder(n_dim).to(device)
 
         self.optimizer = optim.Adam(self.parameters(), lr=lr, eps=eps)
-
         self.gamma = gamma
         self.clip = clip
         self.entropy_coef = entropy_coef
@@ -98,6 +100,7 @@ class MultiAgentTransformer(nn.Module):
         action_mask: torch.Tensor = None,
         deterministic: bool = False,
         action_seq: torch.Tensor = None,
+        order_seq: torch.Tensor = None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Get action and its value prediction for given state sequence.
@@ -111,14 +114,60 @@ class MultiAgentTransformer(nn.Module):
         Returns:
             tuple: Action vector, action log probabilities, entropy, and value prediction for the state sequence.
         """
-        n_env, _, _ = state_seq.shape
+        n_env, n_agent, _ = state_seq.shape
         hidden_state, values = self.encoder(state_seq)
+
+        ordered_state = None
+        ordered_enc_state = None
+        order = None
+        if order_seq is None:
+                   
+            for i in range(n_agent):
+                order_prob = self.pointer(hidden_state, ordered_state, index_seq=order)
+                latest_prob = order_prob[:, -1, :]
+                if deterministic:
+                    a = latest_prob.argmax(dim=-1).unsqueeze(-1).to(torch.int64)
+                else:
+                    lp = Categorical(latest_prob)
+                    a = lp.sample().unsqueeze(-1).to(torch.int64)
+                if order is not None:
+                    order = torch.cat([order, a], dim=-1)
+                else:
+                    order = a
+                ordered_state = torch.gather(
+                    hidden_state,
+                    dim=-2,
+                    index=order.unsqueeze(-1).expand(-1, -1, hidden_state.shape[-1]),
+                )
+        else:
+            if len(order_seq.shape) == 3:
+                order_seq = order_seq.squeeze(-1)
+            order_seq = order_seq.to(torch.int64)
+            ordered_state = torch.gather(
+                hidden_state,
+                dim=-2,
+                index=order_seq.unsqueeze(-1).expand(-1, -1, hidden_state.shape[-1]),
+            )
+            order_prob = self.pointer(hidden_state, ordered_state[:, :-1, :], index_seq=order_seq[:, :-1])
+            order = order_seq
+        
+
+        ordered_enc_state = self.ordered_encoder(hidden_state, ordered_state)
+
+        order_probs = Categorical(order_prob)
+        order_logprobs = order_probs.log_prob(order).unsqueeze(-1)
+
+        action_mask = torch.gather(
+            action_mask,
+            dim=-2,
+            index=order.unsqueeze(-1).expand(-1, -1, action_mask.shape[-1]),
+        )
 
         if action_seq is None:
             # Recurrent action generation
             action_vector = self.bos.expand(n_env, -1)
             for i in range(self.n_agent):
-                action_logits = self.decoder(action_vector, hidden_state, action_mask)
+                action_logits = self.decoder(action_vector, ordered_enc_state, action_mask)
                 latest_action_logit = action_logits[:, i, :]
                 if deterministic:
                     a = latest_action_logit.argmax(dim=-1).unsqueeze(-1).to(torch.int32)
@@ -128,21 +177,27 @@ class MultiAgentTransformer(nn.Module):
                 action_vector = torch.cat([action_vector, a], dim=-1)
         else:
             # Action is already provided
+            action_seq = torch.gather(action_seq.squeeze(-1), dim=-1, index=order).unsqueeze(-1)
+            if len(action_seq.shape) == 2:
+                action_seq = action_seq.unsqueeze(-1)
             action_vector = torch.cat(
                 [self.bos.expand(n_env, -1), action_seq.squeeze().long()], dim=-1
             )
-            action_logits = self.decoder(action_vector, hidden_state, action_mask)
+            action_logits = self.decoder(action_vector[:, :-1], ordered_enc_state, action_mask)
         prob_dist = Categorical(logits=action_logits)
         # Remove bos
         action_vector = action_vector[:, 1:]
+        reversed_index = torch.argsort(order, dim=-1)
         action_logps = prob_dist.log_prob(action_vector.to(torch.int32)).unsqueeze(-1)
-        return action_vector.unsqueeze(-1), action_logps, prob_dist.entropy(), values
+        action_vector = torch.gather(action_vector, dim=-1, index=reversed_index).unsqueeze(-1)
+        return action_vector, action_logps, prob_dist.entropy(), \
+                order.unsqueeze(-1), order_logprobs, order_probs.entropy(), values
 
     def update(self, batch: Transition):
         self.train()
         # Model forward
-        _, new_action_logps, entropy, new_values = self.get_action_and_value(
-            batch.obs, action_mask=batch.action_masks, action_seq=batch.actions
+        _, new_action_logps, entropy, _, new_order_logprobs, order_entropy, new_values = self.get_action_and_value(
+            batch.obs, action_mask=batch.action_masks, action_seq=batch.actions, order_seq=batch.orders
         )
 
         # update critic
@@ -185,46 +240,50 @@ class MultiAgentTransformer(nn.Module):
             ).sum() / batch.active_masks.sum()
         else:
             critic_loss = critic_loss.mean()
-        # critic_loss = (values - returns).pow(2).mean().mean()
-
-        # update actor
-        ratio = torch.exp(new_action_logps - batch.action_logprobs)
-
-
-        # Normalize advantages
+        order_sum_ratio = torch.exp(new_order_logprobs.sum(dim=-2, keepdim=True) - batch.order_logprobs.sum(dim=-2, keepdim=True))
         adv = batch.advantages
         normalized_advantages = (adv - adv.mean()) / (adv.std() + 1e-8)
-
-        # mean advantage
-        # normalized_advantages = normalized_advantages.mean(dim=-2, keepdim=True)
-
+        normalized_advantages = normalized_advantages.mean(dim=-2, keepdim=True)
+        ratio = torch.exp(new_action_logps - batch.action_logprobs)
         surr1 = ratio * normalized_advantages
         surr2 = (
             torch.clamp(ratio, 1.0 - self.clip, 1.0 + self.clip) * normalized_advantages
         )
+        order_surr1 = order_sum_ratio * normalized_advantages
+        order_surr2 = (
+            torch.clamp(order_sum_ratio, 1.0 - self.clip, 1.0 + self.clip) * normalized_advantages
+        )
+        order_loss = -torch.min(order_surr1, order_surr2).mean()
         _use_policy_active_masks = True
+        ordered_active_masks = torch.gather(
+            batch.active_masks,
+            dim=-2,
+            index=batch.orders.to(torch.int64))
         if _use_policy_active_masks:
             policy_loss = (
-                -torch.sum(torch.min(surr1, surr2) * batch.active_masks)
-                / batch.active_masks.sum()
+                -(torch.sum(torch.min(surr1, surr2) * ordered_active_masks))
+                 / (ordered_active_masks.sum())
             )
 
         else:
-            policy_loss = -torch.min(surr1, surr2).mean().mean()
-
+            policy_loss = (
+                -torch.min(surr1, surr2).mean()
+            )
+        
         entropy_only_active = (
-            entropy.unsqueeze(-1) * batch.active_masks
-        ).sum() / batch.active_masks.sum()
+            entropy.unsqueeze(-1) * ordered_active_masks
+        ).sum() / ordered_active_masks.sum()
         actor_loss = policy_loss - self.entropy_coef * entropy_only_active
 
         # Total loss
-        loss = critic_loss + actor_loss
         self.optimizer.zero_grad()
+        loss = critic_loss + actor_loss + order_loss
         loss.backward()
         grad_norm = nn.utils.clip_grad_norm_(
             self.parameters(), max_norm=self.max_grad_norm
         )
         self.optimizer.step()
+
 
         # Additional info for debugging
         # KL

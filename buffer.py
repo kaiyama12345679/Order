@@ -11,6 +11,8 @@ Transition = namedtuple(
         "actions",
         "action_masks",
         "action_logprobs",
+        "orders",
+        "order_logprobs",
         "rewards",
         "dones",
         "active_masks",
@@ -64,6 +66,12 @@ class EpisodeBuffer(object):
         self.action_logprobs = torch.zeros(
             (episode_length, self.n_env, self.n_agents, 1), device=device
         )
+        self.orders = torch.zeros(
+            (episode_length, self.n_env, self.n_agents, 1), device=device
+        )
+        self.order_logprobs = torch.zeros(
+            (episode_length, self.n_env, self.n_agents, 1), device=device
+        )
         self.rewards = torch.zeros(
             (episode_length, self.n_env, self.n_agents, 1), device=device
         )
@@ -76,7 +84,7 @@ class EpisodeBuffer(object):
 
         # To be calculated from the above later
         self.advantages = torch.zeros(
-            (episode_length, self.n_env, self.n_agents, 1), device=device
+            (episode_length, self.n_env,  self.n_agents, 1), device=device
         )
         self.returns = torch.zeros(
             (episode_length, self.n_env, self.n_agents, 1), device=device
@@ -91,6 +99,8 @@ class EpisodeBuffer(object):
         action,
         action_mask,
         action_logprob,
+        order,
+        order_logprob,
         reward,
         done,
         truncateds,
@@ -102,6 +112,8 @@ class EpisodeBuffer(object):
         self.actions[self.counter] = action
         self.action_masks[self.counter] = action_mask
         self.action_logprobs[self.counter] = action_logprob
+        self.orders[self.counter] = order
+        self.order_logprobs[self.counter] = order_logprob
         self.rewards[self.counter] = reward
 
         # Done has information for each agent. Alive: 0.0, Die: 1.0
@@ -163,6 +175,12 @@ class EpisodeBuffer(object):
         action_logprobs = self.action_logprobs.reshape(
             self.episode_length * self.n_env, self.n_agents, -1
         )
+        orders = self.orders.reshape(
+            self.episode_length * self.n_env, self.n_agents, -1
+        )
+        order_logprobs = self.order_logprobs.reshape(
+            self.episode_length * self.n_env, self.n_agents, -1
+        )
         rewards = self.rewards.reshape(
             self.episode_length * self.n_env, self.n_agents, -1
         )
@@ -174,7 +192,7 @@ class EpisodeBuffer(object):
             self.episode_length * self.n_env, self.n_agents, -1
         )
         returns = self.returns.reshape(
-            self.episode_length * self.n_env, self.n_agents, -1
+            self.episode_length * self.n_env,  self.n_agents, -1
         )
 
         total_num = len(obs)
@@ -193,6 +211,8 @@ class EpisodeBuffer(object):
                 actions[sample_indices][:, agent_indices],
                 action_masks[sample_indices][:, agent_indices],
                 action_logprobs[sample_indices][:, agent_indices],
+                orders[sample_indices][:, agent_indices],
+                order_logprobs[sample_indices][:, agent_indices],
                 rewards[sample_indices][:, agent_indices],
                 dones[sample_indices][:, agent_indices],
                 active_masks[sample_indices][:, agent_indices],
@@ -206,6 +226,8 @@ class EpisodeBuffer(object):
                 actions[sample_indices],
                 action_masks[sample_indices],
                 action_logprobs[sample_indices],
+                orders[sample_indices],
+                order_logprobs[sample_indices],
                 rewards[sample_indices],
                 dones[sample_indices],
                 active_masks[sample_indices],
