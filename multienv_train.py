@@ -13,6 +13,7 @@ from MultiAgentTransformer import MultiAgentTransformer
 from buffer import EpisodeBuffer
 from collections import defaultdict
 import subprocess
+from harl.utils.envs_tools import *
 
 def get_current_branch(repository_dir="./") -> str:
     """
@@ -34,14 +35,16 @@ def get_current_branch(repository_dir="./") -> str:
     return current_branch
 
 def evaluation(
-    env: VecStarCraft2Env,
+    env,
     model: MultiAgentTransformer,
     n_eval: int,
 ):
     model.eval()
     device = model.device
     eval_info = defaultdict(list)
-    obs, action_mask = env.reset()
+    obs, share_obs, action_mask = env.reset()
+    n_env = len(obs)
+    total_rewards = np.zeros((n_env))
     while len(eval_info["battle_won"]) < n_eval:
         with torch.no_grad():
             action, action_logps, entropy, order, order_logps, order_entropy, values = model.get_action_and_value(
@@ -49,22 +52,23 @@ def evaluation(
                 torch.tensor(action_mask, dtype=torch.int32, device=device),
                 deterministic=True,
             )
-        (obs, action_mask), rewards, dones, truncateds, infos = env.step(
+        obs, share_obs, rewards, dones, infos, action_mask = env.step(
             action.detach().cpu().numpy()
         )
+        total_rewards += np.array(rewards[:, 0, 0])
         # Check the battle results
-        for env_id, truncated in enumerate(truncateds):
-            if truncated and "battle_won" in infos[env_id]:
+        for env_id, done in enumerate(dones):
+            if done[0] and "battle_won" in infos[env_id][0]:
                 # Finish one episode
                 print(f"Eval [{env_id}]: info: {infos[env_id]}")
                 for key in [
                     "battle_won",
-                    "total_rewards",
-                    "episode_length",
                     "dead_allies",
                     "dead_enemies",
                 ]:
-                    eval_info[key].append(infos[env_id][key])
+                    eval_info[key].append(infos[env_id][0][key])
+                    eval_info["total_rewards"].append(total_rewards[env_id])
+                total_rewards[env_id] = 0
 
     return eval_info
 
@@ -84,7 +88,7 @@ def main(args):
     gamma = data["gamma"]
     tau = data["tau"]
     max_batch_size = 10000
-    n_env = data["n_env"]
+    n_train_env = data["n_train_env"]
 
     if not "target_kl" in data:
         # Default target kl for early stopping
@@ -95,7 +99,8 @@ def main(args):
 
     # Setting up tensorboard
     date = datetime.datetime.now()
-    run_name = f"{data['map_name']}-{date.month}-{date.day}-{date.hour}-{date.minute}"
+    branch_name = get_current_branch()
+    run_name = f"{data['env_args']['map_name']}-{branch_name}-{date.month}-{date.day}-{date.hour}-{date.minute}"
     if args.track:
         config_dict = vars(args)
         config_dict.update(data)
@@ -107,8 +112,7 @@ def main(args):
             save_code=True,
         )
     # Summary writer
-    branch_name = get_current_branch()
-    save_dir = "models/" + save_path + f"/{branch_name + run_name}/"
+    save_dir = "models/" + save_path + f"/{run_name}/"
     if os.path.exists(save_dir):
         shutil.rmtree(save_dir)
     if not debug:
@@ -117,19 +121,26 @@ def main(args):
     torch.set_num_threads(n_training_threads)
 
     # Setup vectorized envs
-    env = VecStarCraft2Env(n_env=n_env, map_name=data["map_name"], remote_envs=True, version=data["version"])
-    eval_env = VecStarCraft2Env(n_env=2, map_name=data["map_name"], remote_envs=True, version=data["version"])
+    env = make_train_env(data["env_name"], data["train_seed"], data["n_train_env"], data["env_args"])
+    eval_env = make_eval_env(data["env_name"], data["eval_seed"], data["n_eval_env"], data["env_args"])
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    obs_dim = env.obs_dim
+    obs_space = env.observation_space
+    action_space = env.action_space
+    obs_shape = get_shape_from_obs_space(obs_space)
+    obs_dim = obs_shape[0].shape[0]
+    action_dim = action_space[0].n
+    action_type = action_space.__class__.__name__
+
+    num_agents = get_num_agents(data["env_name"],data["env_args"], env)
 
     model = MultiAgentTransformer(
         data["n_dim"],
         data["n_head"],
         data["num_layer_encoder"],
         obs_dim,
-        env.action_dim,
+        action_dim,
         data["num_layer_decoder"],
-        n_agent=env.n_agents,
+        n_agent=num_agents,
         gamma=data["gamma"],
         clip=data["clip"],
         lr=float(data["lr"]),
@@ -166,16 +177,17 @@ def main(args):
     show_parameters(model.decoder)
 
     # Reset environment
-    obs, action_mask = env.reset()
+    total_rewards = np.zeros((n_train_env))
+    obs, share_obs, action_mask = env.reset()
     try:
-        for update in range(n_steps // (n_env * time_horizon)):
+        for update in range(n_steps // (n_train_env * time_horizon)):
             # Rollout
             model.eval()
             eps_buffer = EpisodeBuffer(
-                env.n_env,
-                env.n_agents,
+                data["n_train_env"],
+                num_agents,
                 obs_dim,
-                env.action_dim,
+                action_dim,
                 gamma,
                 tau,
                 time_horizon,
@@ -192,24 +204,25 @@ def main(args):
                         deterministic=False,
                     )
 
-                (next_obs, next_action_mask), reward, done, truncateds, info = env.step(
+                next_obs, next_share_obs, rewards, dones, infos, next_action_mask = env.step(
                     action.detach().cpu().numpy()
                 )
+                total_rewards += np.array(rewards[:, 0, 0])
 
                 # Check if any environments are done
-                for env_id, truncated in enumerate(truncateds):
-                    if truncated and "battle_won" in info[env_id]:
+                for env_id, done in enumerate(dones):
+                    if done[0] and "battle_won" in infos[env_id][0]:
                         # Finish one episode
-                        total_reward = info[env_id]["total_rewards"]
-                        rollout_info["total_rewards"].append(total_reward)
-                        print(f"Train [{env_id}]: total rewards: {total_reward}")
+                        rollout_info["total_rewards"].append(total_rewards[env_id])
+                        print(f"Train [{env_id}]: total rewards: {total_rewards[env_id]}")
                         for key in [
                             "battle_won",
-                            "episode_length",
                             "dead_allies",
                             "dead_enemies",
                         ]:
-                            rollout_info[key].append(info[env_id][key])
+                            rollout_info[key].append(infos[env_id][0][key])
+                            rollout_info["total_rewards"].append(total_rewards[env_id])
+                        total_rewards[env_id] = 0
 
                 # Add in buffer
                 eps_buffer.insert(
@@ -237,7 +250,7 @@ def main(args):
 
             # Recode info related to rollout
             tag = "rollout"
-            global_step = update * n_env * time_horizon
+            global_step = update * n_train_env * time_horizon
             for k, v in rollout_info.items():
                 if not debug:
                     writer.add_scalar(f"{tag}/{k}_mean", np.mean(v), global_step)
@@ -286,13 +299,13 @@ def main(args):
             for k, v in train_info.items():
                 v /= n_ppo_update
                 if not debug:
-                    writer.add_scalar(f"train/{k}", v, update * n_env * time_horizon)
+                    writer.add_scalar(f"train/{k}", v, update * n_train_env * time_horizon)
 
             if update % 20 == 0:
                 # Evaluation
                 eval_info = evaluation(eval_env, model, n_eval_episodes)
                 tag = "eval"
-                global_step = update * n_env * time_horizon
+                global_step = update * n_train_env * time_horizon
                 for k, v in eval_info.items():
                     if not debug:
                         writer.add_scalar(f"{tag}/{k}_mean", np.mean(v), global_step)
@@ -303,8 +316,8 @@ def main(args):
 
             if update % 500 == 0:
                 # Save checkpoint
-                if not debug:
-                    model.save_model(save_dir + f"{data['map_name']}-episode-{update}")
+                model.save_model(save_dir + f"-episode-{update}")
+
     finally:
         env.close()
         if args.track:
