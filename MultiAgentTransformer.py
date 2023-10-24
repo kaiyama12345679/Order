@@ -62,7 +62,7 @@ class MultiAgentTransformer(nn.Module):
 
         self.encoder = Encoder(n_dim, n_head, obs_dim, num_layer_encoder).to(device)
         self.decoder = Decoder(n_dim, n_head, action_dim, num_layer_decoder).to(device)
-        self.pointer = Pointer(n_dim=n_dim).to(device)
+        self.ordered_encoder = OrderedEncoder(n_dim).to(device)
 
         self.optimizer = optim.Adam(self.parameters(), lr=lr, eps=eps)
         self.gamma = gamma
@@ -120,24 +120,12 @@ class MultiAgentTransformer(nn.Module):
         ordered_enc_state = None
         order = None
         if order_seq is None:
-                   
-            for i in range(n_agent):
-                order_prob = self.pointer(hidden_state, ordered_state, index_seq=order)
-                latest_prob = order_prob[:, -1, :]
-                if deterministic:
-                    a = latest_prob.argmax(dim=-1).unsqueeze(-1).to(torch.int64)
-                else:
-                    lp = Categorical(latest_prob)
-                    a = lp.sample().unsqueeze(-1).to(torch.int64)
-                if order is not None:
-                    order = torch.cat([order, a], dim=-1)
-                else:
-                    order = a
-                ordered_state = torch.gather(
-                    hidden_state,
-                    dim=-2,
-                    index=order.unsqueeze(-1).expand(-1, -1, hidden_state.shape[-1]),
-                )
+            order = torch.stack([torch.randperm(n_agent) for _ in range(n_env)]).to(self.device) 
+            ordered_state = torch.gather(
+                hidden_state,
+                dim=-2,
+                index=order.unsqueeze(-1).expand(-1, -1, hidden_state.shape[-1]),
+            )
         else:
             if len(order_seq.shape) == 3:
                 order_seq = order_seq.squeeze(-1)
@@ -147,14 +135,12 @@ class MultiAgentTransformer(nn.Module):
                 dim=-2,
                 index=order_seq.unsqueeze(-1).expand(-1, -1, hidden_state.shape[-1]),
             )
-            order_prob = self.pointer(hidden_state, ordered_state[:, :-1, :], index_seq=order_seq[:, :-1])
             order = order_seq
         
 
-        ordered_enc_state = ordered_state
+        ordered_enc_state = self.ordered_encoder(hidden_state, ordered_state)
 
-        order_probs = Categorical(order_prob)
-        order_logprobs = order_probs.log_prob(order).unsqueeze(-1)
+        order_logprobs = torch.zeros((n_env, n_agent, 1)).to(state_seq.device)
 
         action_mask = torch.gather(
             action_mask,
@@ -190,7 +176,7 @@ class MultiAgentTransformer(nn.Module):
         action_logps = prob_dist.log_prob(action_vector.to(torch.int32)).unsqueeze(-1)
         action_vector = torch.gather(action_vector, dim=-1, index=reversed_index).unsqueeze(-1)
         return action_vector, action_logps, prob_dist.entropy(), \
-                order.unsqueeze(-1), order_logprobs, order_probs.entropy(), values
+                order.unsqueeze(-1), order_logprobs, 1, values
 
     def update(self, batch: Transition):
         self.train()
@@ -248,11 +234,6 @@ class MultiAgentTransformer(nn.Module):
         surr2 = (
             torch.clamp(ratio, 1.0 - self.clip, 1.0 + self.clip) * normalized_advantages
         )
-        order_surr1 = order_sum_ratio * normalized_advantages
-        order_surr2 = (
-            torch.clamp(order_sum_ratio, 1.0 - self.clip, 1.0 + self.clip) * normalized_advantages
-        )
-        order_loss = -torch.min(order_surr1, order_surr2).mean()
         _use_policy_active_masks = True
         ordered_active_masks = torch.gather(
             batch.active_masks,
@@ -276,7 +257,7 @@ class MultiAgentTransformer(nn.Module):
 
         # Total loss
         self.optimizer.zero_grad()
-        loss = critic_loss + actor_loss + order_loss
+        loss = critic_loss + actor_loss
         loss.backward()
         grad_norm = nn.utils.clip_grad_norm_(
             self.parameters(), max_norm=self.max_grad_norm

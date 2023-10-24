@@ -132,8 +132,8 @@ class Decoder(nn.Module):
         action_embed_seq = self.decode_embed(one_hot_action_seq.to(dtype=torch.float))
         batch_size, seq_len, action_dim = action_embed_seq.shape
         pe = positional_encoding(seq_len, action_dim, hidden_state.device)
-        #action_embed_seq = self.ln(action_embed_seq) * math.sqrt(action_dim) + pe
-        action_embed_seq = self.ln(action_embed_seq)
+        action_embed_seq = self.ln(action_embed_seq) * math.sqrt(action_dim) + pe
+        #action_embed_seq = self.ln(action_embed_seq)
 
         for decoder in self.decoder:
             action_embed_seq = decoder(tgt=hidden_state, src=action_embed_seq)
