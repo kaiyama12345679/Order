@@ -249,7 +249,7 @@ class OrderedEncoder(nn.Module):
         net_input = ordered_seq
         if net_input is not None:
             pe = positional_encoding(net_input.shape[1], net_input.shape[-1], net_input.device)
-            #net_input = math.sqrt(net_input.shape[-1]) * net_input + pe
+            net_input = math.sqrt(net_input.shape[-1]) * net_input + pe
             x = self.encoder(net_input)
             return x
         else:

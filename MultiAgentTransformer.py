@@ -63,7 +63,6 @@ class MultiAgentTransformer(nn.Module):
         self.encoder = Encoder(n_dim, n_head, obs_dim, num_layer_encoder).to(device)
         self.decoder = Decoder(n_dim, n_head, action_dim, num_layer_decoder).to(device)
         self.pointer = Pointer(n_dim=n_dim).to(device)
-        self.ordered_encoder = OrderedEncoder(n_dim).to(device)
 
         self.optimizer = optim.Adam(self.parameters(), lr=lr, eps=eps)
         self.gamma = gamma
@@ -152,7 +151,7 @@ class MultiAgentTransformer(nn.Module):
             order = order_seq
         
 
-        ordered_enc_state = self.ordered_encoder(hidden_state, ordered_state)
+        ordered_enc_state = ordered_state
 
         order_probs = Categorical(order_prob)
         order_logprobs = order_probs.log_prob(order).unsqueeze(-1)
