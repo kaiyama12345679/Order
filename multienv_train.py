@@ -232,9 +232,8 @@ def main(args):
                     action_logps,
                     order,
                     order_logps,
-                    torch.tensor(reward, dtype=torch.float32, device=device),
-                    torch.tensor(done, dtype=torch.float32, device=device),
-                    torch.tensor(truncateds, dtype=torch.float32, device=device),
+                    torch.tensor(rewards, dtype=torch.float32, device=device),
+                    torch.tensor(dones, dtype=torch.float32, device=device),
                     values,
                 )
                 obs = next_obs
@@ -323,7 +322,7 @@ def main(args):
         if args.track:
             wandb.finish()
         if not debug:
-            model.save_model(save_dir + data["map_name"])
+            model.save_model(save_dir)
             with open(save_dir + "train.yaml", "w") as f:
                 yaml.safe_dump(data, f)
 
