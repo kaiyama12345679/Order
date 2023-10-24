@@ -14,6 +14,8 @@ from buffer import EpisodeBuffer
 from collections import defaultdict
 import subprocess
 from harl.utils.envs_tools import *
+import logging
+logging.disable(logging.FATAL)
 
 def get_current_branch(repository_dir="./") -> str:
     """
