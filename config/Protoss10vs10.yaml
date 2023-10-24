@@ -8,13 +8,15 @@ clip: 0.05
 lr: 5e-4
 eps: 1e-5
 entropy_coef: 0.01
-map_name: "10gen_terran"
+env_name: smacv2
+train_seed: 1024
+eval_seed: 1024
+env_args:
+    map_name: protoss_10_vs_10
 n_steps: 1e7
 max_grad_norm: 10
 huber_delta: 10.0
 n_ppo_update: 15
 time_horizon: 100
-n_env: 32
-version: 2
-n_agents: 10
-n_enemies: 10
+n_train_env: 32
+n_eval_env: 20
