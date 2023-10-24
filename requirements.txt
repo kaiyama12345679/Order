@@ -1,0 +1,8 @@
+tensorboard
+black
+PySC2==3.0.0
+ray[rllib]==2.6.1  
+wandb==0.12.11
+protobuf==3.20.2
+chardet==5.2.0
+numpy==1.23.5
