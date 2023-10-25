@@ -1,0 +1,22 @@
+n_dim: 64
+n_head: 1
+num_layer_encoder: 1
+num_layer_decoder: 1
+gamma: 0.99
+tau: 0.95
+clip: 0.05
+lr: 5e-4
+eps: 1e-5
+entropy_coef: 0.01
+env_name: smacv2
+train_seed: 1024
+eval_seed: 1024
+env_args:
+    map_name: terran_10_vs_10
+n_steps: 1e7
+max_grad_norm: 10
+huber_delta: 10.0
+n_ppo_update: 15
+time_horizon: 100
+n_train_env: 32
+n_eval_env: 20
