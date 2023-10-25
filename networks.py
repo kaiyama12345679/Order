@@ -196,17 +196,6 @@ class DecoderBlock(nn.Module):
 
         return hidden_ff
 
-
-class Pointer(nn.Module):
-    def __init__(self, n_dim):
-        super().__init__()
-        self.mha_enc = nn.MultiheadAttention(n_dim, num_heads=1, batch_first=True)
-        self.mha = nn.MultiheadAttention(n_dim, num_heads=1, batch_first=True)
-        self.vl = nn.Parameter(torch.randn(1, 1, n_dim))
-        self.Wq = nn.Linear(3 * n_dim, n_dim, bias=False)
-        init_mha_(self.mha)
-        init_mha_(self.mha_enc)
-
 class Pointer_Encoder(nn.Module):
     def __init__(self, state_dim, n_dim) -> None:
         super().__init__()
@@ -224,8 +213,17 @@ class Pointer_Encoder(nn.Module):
         x = self.ln(x)
         x = self.encoder(x)
         return x
-        
 
+
+class Pointer(nn.Module):
+    def __init__(self, n_dim):
+        super().__init__()
+        self.mha_enc = nn.MultiheadAttention(n_dim, num_heads=1, batch_first=True)
+        self.mha = nn.MultiheadAttention(n_dim, num_heads=1, batch_first=True)
+        self.vl = nn.Parameter(torch.randn(1, 1, n_dim))
+        self.Wq = nn.Linear(3 * n_dim, n_dim, bias=False)
+        init_mha_(self.mha)
+        init_mha_(self.mha_enc)        
 
     def forward(self, state_seq, ordered_seq=None, index_seq=None):
         batch_size, n_agent, n_dim = state_seq.shape
