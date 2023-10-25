@@ -206,6 +206,24 @@ class Pointer(nn.Module):
         self.Wq = nn.Linear(3 * n_dim, n_dim, bias=False)
         init_mha_(self.mha)
         init_mha_(self.mha_enc)
+
+class Pointer_Encoder(nn.Module):
+    def __init__(self, state_dim, n_dim) -> None:
+        super().__init__()
+        self.encode_embed = nn.Sequential(
+            nn.LayerNorm(state_dim),
+            init_(nn.Linear(state_dim, n_dim), activate=True),
+            nn.GELU(),
+        )
+        self.encoder = EncoderBlock(n_dim, n_head=1)
+
+        self.ln = nn.LayerNorm(n_dim)
+    
+    def forward(self, x):
+        x = self.encode_embed(x)
+        x = self.ln(x)
+        x = self.encoder(x)
+        return x
         
 
 

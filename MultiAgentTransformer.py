@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 import numpy as np
 from torch.distributions import Categorical
-from networks import Encoder, Decoder, Pointer, OrderedEncoder, positional_encoding
+from networks import Encoder, Decoder, Pointer, OrderedEncoder, positional_encoding, Pointer_Encoder
 from buffer import Transition
 from valuenorm import ValueNorm
 import math
@@ -63,8 +63,10 @@ class MultiAgentTransformer(nn.Module):
         self.encoder = Encoder(n_dim, n_head, obs_dim, num_layer_encoder).to(device)
         self.decoder = Decoder(n_dim, n_head, action_dim, num_layer_decoder).to(device)
         self.pointer = Pointer(n_dim=n_dim).to(device)
+        self.pointer_encoder = Pointer_Encoder(state_dim=obs_dim, n_dim=n_dim).to(device)
 
-        self.optimizer = optim.Adam(self.parameters(), lr=lr, eps=eps)
+        self.optimizer = optim.Adam(list(self.encoder.parameters()) + list(self.decoder.parameters()), lr=lr, eps=eps)
+        self.optimier2 = optim.Adam(list(self.pointer.parameters()) + list(self.pointer_encoder.parameters()) , lr=lr, eps=eps)
         self.gamma = gamma
         self.clip = clip
         self.entropy_coef = entropy_coef
@@ -115,14 +117,16 @@ class MultiAgentTransformer(nn.Module):
         """
         n_env, n_agent, _ = state_seq.shape
         hidden_state, values = self.encoder(state_seq)
+        pointer_hidden_state = self.pointer_encoder(state_seq)
 
         ordered_state = None
+        ordered_pointer_state = None
         ordered_enc_state = None
         order = None
         if order_seq is None:
                    
             for i in range(n_agent):
-                order_prob = self.pointer(hidden_state, ordered_state, index_seq=order)
+                order_prob = self.pointer(pointer_hidden_state, ordered_pointer_state, index_seq=order)
                 latest_prob = order_prob[:, -1, :]
                 if deterministic:
                     a = latest_prob.argmax(dim=-1).unsqueeze(-1).to(torch.int64)
@@ -133,8 +137,8 @@ class MultiAgentTransformer(nn.Module):
                     order = torch.cat([order, a], dim=-1)
                 else:
                     order = a
-                ordered_state = torch.gather(
-                    hidden_state,
+                ordered_pointer_state = torch.gather(
+                    pointer_hidden_state,
                     dim=-2,
                     index=order.unsqueeze(-1).expand(-1, -1, hidden_state.shape[-1]),
                 )
@@ -142,13 +146,19 @@ class MultiAgentTransformer(nn.Module):
             if len(order_seq.shape) == 3:
                 order_seq = order_seq.squeeze(-1)
             order_seq = order_seq.to(torch.int64)
-            ordered_state = torch.gather(
-                hidden_state,
+            ordered_pointer_state = torch.gather(
+                pointer_hidden_state,
                 dim=-2,
                 index=order_seq.unsqueeze(-1).expand(-1, -1, hidden_state.shape[-1]),
             )
-            order_prob = self.pointer(hidden_state, ordered_state[:, :-1, :], index_seq=order_seq[:, :-1])
+            order_prob = self.pointer(pointer_hidden_state, ordered_pointer_state[:, :-1, :], index_seq=order_seq[:, :-1])
             order = order_seq
+
+        ordered_state = torch.gather(
+                    hidden_state,
+                    dim=-2,
+                    index=order.unsqueeze(-1).expand(-1, -1, hidden_state.shape[-1]),
+                )
         
 
         ordered_enc_state = ordered_state
@@ -276,12 +286,16 @@ class MultiAgentTransformer(nn.Module):
 
         # Total loss
         self.optimizer.zero_grad()
-        loss = critic_loss + actor_loss + order_loss
+        loss = critic_loss + actor_loss
         loss.backward()
         grad_norm = nn.utils.clip_grad_norm_(
             self.parameters(), max_norm=self.max_grad_norm
         )
         self.optimizer.step()
+
+        self.optimier2.zero_grad()
+        order_loss.backward()
+        self.optimier2.step()
 
 
         # Additional info for debugging
