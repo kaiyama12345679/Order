@@ -56,12 +56,8 @@ class MultiAgentTransformer(nn.Module):
         self.num_layer_decoder = num_layer_decoder
         self.device = device
 
-        self.bos = torch.full((1, 1), fill_value=action_dim, dtype=torch.long).to(
-            device
-        )
-
-        self.encoder = Encoder(n_dim, n_head, obs_dim, num_layer_encoder).to(device)
-        self.decoder = Decoder(n_dim, n_head, action_dim, num_layer_decoder).to(device)
+        self.encoder = Encoder(n_dim, n_head, obs_dim + n_agent, num_layer_encoder).to(device)
+        self.decoder = Decoder(n_dim, n_head, n_agent, action_dim, num_layer_decoder).to(device)
         self.pointer = Pointer(n_dim=n_dim).to(device)
 
         self.optimizer = optim.Adam(self.parameters(), lr=lr, eps=eps)
@@ -90,6 +86,7 @@ class MultiAgentTransformer(nn.Module):
         Returns:
             torch.Tensor: Value prediction for the state sequence.
         """
+        state_seq = self._add_id_vector(state_seq)
         hidden_state, values = self.encoder(state_seq)
         return values
 
@@ -114,6 +111,7 @@ class MultiAgentTransformer(nn.Module):
             tuple: Action vector, action log probabilities, entropy, and value prediction for the state sequence.
         """
         n_env, n_agent, _ = state_seq.shape
+        state_seq = self._add_id_vector(state_seq)
         hidden_state, values = self.encoder(state_seq)
 
         ordered_state = None
@@ -164,33 +162,37 @@ class MultiAgentTransformer(nn.Module):
 
         if action_seq is None:
             # Recurrent action generation
-            action_vector = self.bos.expand(n_env, -1)
+            action_vector = None
             for i in range(self.n_agent):
-                action_logits = self.decoder(action_vector, ordered_enc_state, action_mask)
+                action_logits = self.decoder(action_vector, order, ordered_enc_state, action_mask)
                 latest_action_logit = action_logits[:, i, :]
                 if deterministic:
                     a = latest_action_logit.argmax(dim=-1).unsqueeze(-1).to(torch.int32)
                 else:
                     latest_a = Categorical(logits=latest_action_logit)
                     a = latest_a.sample().unsqueeze(-1).to(torch.int32)
-                action_vector = torch.cat([action_vector, a], dim=-1)
+                if action_vector is not None:
+                    action_vector = torch.cat([action_vector, a], dim=-1)
+                else:
+                    action_vector = a
         else:
             # Action is already provided
-            action_seq = torch.gather(action_seq.squeeze(-1), dim=-1, index=order).unsqueeze(-1)
-            if len(action_seq.shape) == 2:
-                action_seq = action_seq.unsqueeze(-1)
-            action_vector = torch.cat(
-                [self.bos.expand(n_env, -1), action_seq.squeeze().long()], dim=-1
-            )
-            action_logits = self.decoder(action_vector[:, :-1], ordered_enc_state, action_mask)
+            action_vector = torch.gather(action_seq.squeeze(-1), dim=-1, index=order)
+            action_logits = self.decoder(action_vector, order, ordered_enc_state, action_mask)
         prob_dist = Categorical(logits=action_logits)
         # Remove bos
-        action_vector = action_vector[:, 1:]
+        action_vector = action_vector
         reversed_index = torch.argsort(order, dim=-1)
         action_logps = prob_dist.log_prob(action_vector.to(torch.int32)).unsqueeze(-1)
         action_vector = torch.gather(action_vector, dim=-1, index=reversed_index).unsqueeze(-1)
         return action_vector, action_logps, prob_dist.entropy(), \
                 order.unsqueeze(-1), order_logprobs, order_probs.entropy(), values
+
+    def _add_id_vector(self, state_seq: torch.Tensor):
+        batch_size, n_agent, state_dim = state_seq.shape
+        id_vector = torch.eye(n_agent).unsqueeze(0).expand(batch_size, -1, -1).to(state_seq.device)
+        state_seq = torch.cat([state_seq, id_vector], dim=-1)
+        return state_seq
 
     def update(self, batch: Transition):
         self.train()
@@ -240,6 +242,9 @@ class MultiAgentTransformer(nn.Module):
         else:
             critic_loss = critic_loss.mean()
         order_sum_ratio = torch.exp(new_order_logprobs.sum(dim=-2, keepdim=True) - batch.order_logprobs.sum(dim=-2, keepdim=True))
+        order_ratio = torch.exp(new_order_logprobs - batch.order_logprobs)
+        n_agent = new_action_logps.shape[-2]
+        order_log_sum = new_order_logprobs.sum(dim=-2, keepdims=True)
         adv = batch.advantages
         normalized_advantages = (adv - adv.mean()) / (adv.std() + 1e-8)
         normalized_advantages = normalized_advantages.mean(dim=-2, keepdim=True)
@@ -248,10 +253,9 @@ class MultiAgentTransformer(nn.Module):
         surr2 = (
             torch.clamp(ratio, 1.0 - self.clip, 1.0 + self.clip) * normalized_advantages
         )
-        order_surr1 = order_sum_ratio * normalized_advantages
-        order_surr2 = (
-            torch.clamp(order_sum_ratio, 1.0 - self.clip, 1.0 + self.clip) * normalized_advantages
-        )
+        order_surr1 = torch.clamp(order_ratio, 1.0 - self.clip, 1.0 + self.clip) * normalized_advantages
+        order_surr2 = order_ratio * normalized_advantages
+
         order_loss = -torch.min(order_surr1, order_surr2).mean()
         _use_policy_active_masks = True
         ordered_active_masks = torch.gather(
