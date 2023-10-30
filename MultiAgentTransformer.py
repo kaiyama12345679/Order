@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 import numpy as np
-from torch.distributions import Categorical
+from torch.distributions import Categorical, Normal
 from networks import Encoder, Decoder
 from buffer import Transition
 from valuenorm import ValueNorm
@@ -27,6 +27,7 @@ class MultiAgentTransformer(nn.Module):
         max_grad_norm: float,
         huber_delta: float,
         device: torch.device,
+        discrete = True,
     ) -> None:
         """
         Initialize MultiAgentTransformer.
@@ -55,12 +56,8 @@ class MultiAgentTransformer(nn.Module):
         self.num_layer_decoder = num_layer_decoder
         self.device = device
 
-        self.bos = torch.full((1, 1), fill_value=action_dim, dtype=torch.long).to(
-            device
-        )
-
         self.encoder = Encoder(n_dim, n_head, obs_dim, num_layer_encoder).to(device)
-        self.decoder = Decoder(n_dim, n_head, action_dim, num_layer_decoder).to(device)
+        self.decoder = Decoder(n_dim, n_head, action_dim, num_layer_decoder, discrete).to(device)
 
         self.optimizer = optim.Adam(self.parameters(), lr=lr, eps=eps)
 
@@ -73,6 +70,7 @@ class MultiAgentTransformer(nn.Module):
 
         self.obs_dim = obs_dim
         self.action_dim = action_dim
+        self.discrete = discrete
 
         # Normal axes should be 2
         self.value_normalizer = ValueNorm(
@@ -116,27 +114,40 @@ class MultiAgentTransformer(nn.Module):
 
         if action_seq is None:
             # Recurrent action generation
-            action_vector = self.bos.expand(n_env, -1)
+            action_vector = None
             for i in range(self.n_agent):
                 action_logits = self.decoder(action_vector, hidden_state, action_mask)
                 latest_action_logit = action_logits[:, i, :]
                 if deterministic:
-                    a = latest_action_logit.argmax(dim=-1).unsqueeze(-1).to(torch.int32)
+                    if self.discrete:
+                        a = latest_action_logit.argmax(dim=-1).unsqueeze(-1).to(torch.int32)
+                    else:
+                        a = latest_action
                 else:
-                    latest_a = Categorical(logits=latest_action_logit)
-                    a = latest_a.sample().unsqueeze(-1).to(torch.int32)
-                action_vector = torch.cat([action_vector, a], dim=-1)
+                    if self.discrete:
+                        latest_a = Categorical(logits=latest_action_logit)
+                        a = latest_a.sample().unsqueeze(-1).to(torch.int32)
+                    else:
+                        latest_mean = latest_action_logit
+                        action_std = torch.sigmoid(self.decoder.log_std) * 0.5
+                        distri = Normal(latest_mean, action_std)
+                        a = distri.sample()
+
+
+                action_vector = torch.cat([action_vector, a], dim=-2)
         else:
             # Action is already provided
-            action_vector = torch.cat(
-                [self.bos.expand(n_env, -1), action_seq.squeeze().long()], dim=-1
-            )
+            action_vector = action_seq
             action_logits = self.decoder(action_vector, hidden_state, action_mask)
-        prob_dist = Categorical(logits=action_logits)
+        if self.discrete:
+            prob_dist = Categorical(logits=action_logits)
+        else:
+            action_std = torch.sigmoid(self.decoder.log_std) * 0.5
+            prob_dist = Normal(action_logits, action_std)
         # Remove bos
-        action_vector = action_vector[:, 1:]
-        action_logps = prob_dist.log_prob(action_vector.to(torch.int32)).unsqueeze(-1)
-        return action_vector.unsqueeze(-1), action_logps, prob_dist.entropy(), values
+        action_vector = action_vector[:, 1:, :]
+        action_logps = prob_dist.log_prob(action_vector).unsqueeze(-1)
+        return action_vector, action_logps, prob_dist.entropy(), values
 
     def update(self, batch: Transition):
         self.train()

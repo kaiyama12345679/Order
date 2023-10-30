@@ -42,6 +42,8 @@ def evaluation(
     device = model.device
     eval_info = defaultdict(list)
     obs, share_obs, action_mask = env.reset()
+    if action_mask is None:
+        action_mask = np.ones_like(action.detach().cpu().numpy())
     n_env = len(obs)
     total_rewards = np.zeros((n_env))
     while len(eval_info["battle_won"]) < n_eval:
@@ -54,6 +56,8 @@ def evaluation(
         obs, share_obs, rewards, dones, infos, action_mask = env.step(
             action.detach().cpu().numpy()
         )
+        if action_mask is None:
+            action_mask = np.ones_like(action.detach().cpu().numpy())
         total_rewards += np.array(rewards[:, 0, 0])
         # Check the battle results
         for env_id, done in enumerate(dones):
@@ -178,6 +182,8 @@ def main(args):
     # Reset environment
     total_rewards = np.zeros((n_train_env))
     obs, share_obs, action_mask = env.reset()
+    if action_mask is None:
+        action_mask = np.ones_like(action.detach().cpu().numpy())
     try:
         for update in range(n_steps // (n_train_env * time_horizon)):
             # Rollout
@@ -206,6 +212,8 @@ def main(args):
                 next_obs, next_share_obs, rewards, dones, infos, next_action_mask = env.step(
                     action.detach().cpu().numpy()
                 )
+                if next_action_mask is None:
+                    next_action_mask = np.ones_like(action.detach().cpu().numpy())
                 total_rewards += np.array(rewards[:, 0, 0])
 
                 # Check if any environments are done
