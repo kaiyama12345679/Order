@@ -20,3 +20,5 @@ n_ppo_update: 15
 time_horizon: 100
 n_train_env: 32
 n_eval_env: 20
+map_name: protoss_10_vs_10
+discrete: True

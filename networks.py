@@ -125,7 +125,7 @@ class Decoder(nn.Module):
 
         if not discrete:
             self.log_std = nn.Parameter(torch.ones(action_dim))
-            self.bos = nn.Paramter(torch.randn(1, 1, action_dim))
+            self.bos = nn.Parameter(torch.randn(1, 1, action_dim))
         else:
             self.bos = torch.full((1, 1, 1), action_dim)
 
@@ -138,11 +138,11 @@ class Decoder(nn.Module):
         """
         batch_size, n_agent, n_dim = hidden_state.shape
         if action_seq is not None:
-            action_seq = torch.concat([self.bos.expand(batch_size, -1, -1), action_seq], dim=-2)
+            action_seq = torch.concat([self.bos.expand(batch_size, -1, -1).to(hidden_state.device), action_seq], dim=-2)
         else:
-            action_seq = self.bos.expand(batch_size, -1, -1)
-        if self.discrete
-            one_hot_action_seq = F.one_hot(action_seq.squeeze(-1), num_classes=self.action_dim + 1)
+            action_seq = self.bos.expand(batch_size, -1, -1).to(hidden_state.device)
+        if self.discrete:
+            one_hot_action_seq = F.one_hot(action_seq.squeeze(-1).to(torch.int64), num_classes=self.action_dim + 1)
             action_embed_seq = self.decode_embed(one_hot_action_seq.to(dtype=torch.float))
         else:
             action_embed_seq = self.decode_embed(action_seq)

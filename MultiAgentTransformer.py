@@ -7,6 +7,7 @@ from torch.distributions import Categorical, Normal
 from networks import Encoder, Decoder
 from buffer import Transition
 from valuenorm import ValueNorm
+from typing import Tuple
 
 
 class MultiAgentTransformer(nn.Module):
@@ -96,7 +97,7 @@ class MultiAgentTransformer(nn.Module):
         action_mask: torch.Tensor = None,
         deterministic: bool = False,
         action_seq: torch.Tensor = None,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Get action and its value prediction for given state sequence.
 
@@ -117,12 +118,12 @@ class MultiAgentTransformer(nn.Module):
             action_vector = None
             for i in range(self.n_agent):
                 action_logits = self.decoder(action_vector, hidden_state, action_mask)
-                latest_action_logit = action_logits[:, i, :]
+                latest_action_logit = action_logits[:, i, :].unsqueeze(-2)
                 if deterministic:
                     if self.discrete:
                         a = latest_action_logit.argmax(dim=-1).unsqueeze(-1).to(torch.int32)
                     else:
-                        a = latest_action
+                        a = latest_action_logit
                 else:
                     if self.discrete:
                         latest_a = Categorical(logits=latest_action_logit)
@@ -133,8 +134,10 @@ class MultiAgentTransformer(nn.Module):
                         distri = Normal(latest_mean, action_std)
                         a = distri.sample()
 
-
-                action_vector = torch.cat([action_vector, a], dim=-2)
+                if action_vector is None:
+                    action_vector = a
+                else:
+                    action_vector = torch.cat([action_vector, a], dim=-2)
         else:
             # Action is already provided
             action_vector = action_seq
@@ -145,9 +148,14 @@ class MultiAgentTransformer(nn.Module):
             action_std = torch.sigmoid(self.decoder.log_std) * 0.5
             prob_dist = Normal(action_logits, action_std)
         # Remove bos
-        action_vector = action_vector[:, 1:, :]
-        action_logps = prob_dist.log_prob(action_vector).unsqueeze(-1)
-        return action_vector, action_logps, prob_dist.entropy(), values
+        action_vector = action_vector
+        if self.discrete:
+            action_logps = prob_dist.log_prob(action_vector.squeeze(-1)).unsqueeze(-1)
+            entropy = prob_dist.entropy().unsqueeze(-1)
+        else:
+            action_logps = prob_dist.log_prob(action_vector)
+            entropy = prob_dist.entropy()
+        return action_vector, action_logps, entropy, values
 
     def update(self, batch: Transition):
         self.train()
@@ -224,7 +232,7 @@ class MultiAgentTransformer(nn.Module):
             policy_loss = -torch.min(surr1, surr2).mean().mean()
 
         entropy_only_active = (
-            entropy.unsqueeze(-1) * batch.active_masks
+            entropy * batch.active_masks
         ).sum() / batch.active_masks.sum()
         actor_loss = policy_loss - self.entropy_coef * entropy_only_active
 
