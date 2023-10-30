@@ -147,7 +147,7 @@ class Decoder(nn.Module):
             action_seq = torch.concat([self.bos.expand(batch_size, -1, -1).to(hidden_state.device), action_seq], dim=-2)
         else:
             action_seq = self.bos.expand(batch_size, -1, -1).to(hidden_state.device)
-        order = order[:, :action_seq.shape[-1]]
+        order = order[:, :action_seq.shape[-2]]
         action_seq = action_seq[:, :n_agent, :]
         one_hot_order_seq = F.one_hot(order.to(torch.int64), num_classes=n_agent)
         if self.discrete:
