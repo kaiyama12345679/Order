@@ -191,7 +191,7 @@ class MultiAgentTransformer(nn.Module):
         else:
             # Action is already provided
             action_vector = action_seq
-            action_logits = self.decoder(action_vector, hidden_state, action_mask)
+            action_logits = self.decoder(action_vector, order, ordered_enc_state, action_mask)
         if self.discrete:
             prob_dist = Categorical(logits=action_logits)
         else:
