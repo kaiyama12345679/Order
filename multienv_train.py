@@ -6,7 +6,6 @@ from distutils.util import strtobool
 import numpy as np
 import torch
 import yaml
-from vectorized_sc2_env import VecStarCraft2Env
 from torch.utils.tensorboard import SummaryWriter
 import wandb
 from MultiAgentTransformer import MultiAgentTransformer
@@ -42,9 +41,11 @@ def evaluation(
     device = model.device
     eval_info = defaultdict(list)
     obs, share_obs, action_mask = env.reset()
+    if action_mask[0] is None:
+        action_mask = np.ones((obs.shape[0], obs.shape[1], model.action_dim)).tolist()
     n_env = len(obs)
     total_rewards = np.zeros((n_env))
-    while len(eval_info["battle_won"]) < n_eval:
+    while len(eval_info["total_rewards"]) < n_eval:
         with torch.no_grad():
             action, action_logps, entropy, order, order_logps, order_entropy, values = model.get_action_and_value(
                 torch.tensor(obs, dtype=torch.float32, device=device),
@@ -54,19 +55,18 @@ def evaluation(
         obs, share_obs, rewards, dones, infos, action_mask = env.step(
             action.detach().cpu().numpy()
         )
+        if action_mask[0] is None:
+            action_mask = np.ones_like(action.detach().cpu().numpy()).tolist()
         total_rewards += np.array(rewards[:, 0, 0])
         # Check the battle results
         for env_id, done in enumerate(dones):
-            if done[0] and "battle_won" in infos[env_id][0]:
+            if done[0]:
                 # Finish one episode
-                print(f"Eval [{env_id}]: info: {infos[env_id][0]['battle_won']}")
-                for key in [
-                    "battle_won",
-                    "dead_allies",
-                    "dead_enemies",
-                ]:
+                print(f"Eval [{env_id}]: info: {total_rewards[env_id]}")
+                for key in infos[env_id][0].keys():
                     eval_info[key].append(infos[env_id][0][key])
-                    eval_info["total_rewards"].append(total_rewards[env_id])
+                
+                eval_info["total_rewards"].append(total_rewards[env_id])
                 total_rewards[env_id] = 0
 
     return eval_info
@@ -99,7 +99,7 @@ def main(args):
     # Setting up tensorboard
     date = datetime.datetime.now()
     branch_name = get_current_branch()
-    run_name = f"{data['env_args']['map_name']}-{branch_name}-{date.month}-{date.day}-{date.hour}-{date.minute}"
+    run_name = f"{data['map_name']}-{branch_name}-{date.month}-{date.day}-{date.hour}-{date.minute}"
     if args.track:
         config_dict = vars(args)
         config_dict.update(data)
@@ -127,7 +127,12 @@ def main(args):
     action_space = env.action_space
     obs_shape = get_shape_from_obs_space(obs_space)
     obs_dim = obs_shape[0].shape[0]
-    action_dim = action_space[0].n
+    if data["discrete"]:
+        action_dim = action_space[0].n
+    else:
+        action_dim = action_space[0].shape[0]
+        action_low = action_space[0].low
+        action_high = action_space[0].high
     action_type = action_space.__class__.__name__
 
     num_agents = get_num_agents(data["env_name"],data["env_args"], env)
@@ -148,6 +153,7 @@ def main(args):
         max_grad_norm=data["max_grad_norm"],
         huber_delta=data["huber_delta"],
         device=device,
+        discrete=bool(data["discrete"])
     )
 
     def show_parameters(model):
@@ -178,6 +184,8 @@ def main(args):
     # Reset environment
     total_rewards = np.zeros((n_train_env))
     obs, share_obs, action_mask = env.reset()
+    if action_mask[0] is None:
+        action_mask = np.ones((obs.shape[0], obs.shape[1], model.action_dim)).tolist()
     try:
         for update in range(n_steps // (n_train_env * time_horizon)):
             # Rollout
@@ -206,21 +214,19 @@ def main(args):
                 next_obs, next_share_obs, rewards, dones, infos, next_action_mask = env.step(
                     action.detach().cpu().numpy()
                 )
+                if next_action_mask[0] is None:
+                    next_action_mask = np.ones_like(action.detach().cpu().numpy()).tolist()
                 total_rewards += np.array(rewards[:, 0, 0])
 
                 # Check if any environments are done
                 for env_id, done in enumerate(dones):
-                    if done[0] and "battle_won" in infos[env_id][0]:
+                    if done[0]:
                         # Finish one episode
                         rollout_info["total_rewards"].append(total_rewards[env_id])
                         print(f"Train [{env_id}]: total rewards: {total_rewards[env_id]}")
-                        for key in [
-                            "battle_won",
-                            "dead_allies",
-                            "dead_enemies",
-                        ]:
+                        for key in infos[env_id][0].keys():
                             rollout_info[key].append(infos[env_id][0][key])
-                            rollout_info["total_rewards"].append(total_rewards[env_id])
+                        rollout_info["total_rewards"].append(total_rewards[env_id])
                         total_rewards[env_id] = 0
 
                 # Add in buffer
