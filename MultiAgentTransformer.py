@@ -215,6 +215,12 @@ class MultiAgentTransformer(nn.Module):
         )
         return action_vector, action_logps, entropy, \
                 order.unsqueeze(-1), order_logprobs, order_probs.entropy(), values
+    
+    def _add_id_vector(self, state_seq: torch.Tensor):
+        batch_size, n_agent, state_dim = state_seq.shape
+        id_vector = torch.eye(n_agent).unsqueeze(0).expand(batch_size, -1, -1).to(state_seq.device)
+        state_seq = torch.cat([state_seq, id_vector], dim=-1)
+        return state_seq
 
     def update(self, batch: Transition):
         self.train()
