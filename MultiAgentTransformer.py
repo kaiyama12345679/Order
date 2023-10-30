@@ -58,7 +58,7 @@ class MultiAgentTransformer(nn.Module):
         self.num_layer_decoder = num_layer_decoder
         self.device = device
 
-        self.encoder = Encoder(n_dim, n_head, obs_dim, num_layer_encoder).to(device)
+        self.encoder = Encoder(n_dim, n_head, obs_dim + n_agent, num_layer_encoder).to(device)
         self.decoder = Decoder(n_dim, n_head, action_dim, num_layer_decoder, discrete).to(device)
         self.pointer = Pointer(n_dim=n_dim).to(device)
 
