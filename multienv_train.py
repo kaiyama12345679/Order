@@ -36,6 +36,7 @@ def evaluation(
     env,
     model: MultiAgentTransformer,
     n_eval: int,
+    eval_items: list
 ):
     model.eval()
     device = model.device
@@ -63,7 +64,7 @@ def evaluation(
             if done[0]:
                 # Finish one episode
                 print(f"Eval [{env_id}]: info: {total_rewards[env_id]}")
-                for key in infos[env_id][0].keys():
+                for key in eval_items:
                     eval_info[key].append(infos[env_id][0][key])
                 
                 eval_info["total_rewards"].append(total_rewards[env_id])
@@ -77,7 +78,6 @@ def main(args):
     save_path = args.save_path
     config_path = args.config_path
     debug = args.debug
-    n_eval_episodes = args.n_eval_episodes
     with open(config_path, "r") as f:
         data = yaml.safe_load(f)
 
@@ -88,6 +88,7 @@ def main(args):
     tau = data["tau"]
     max_batch_size = 10000
     n_train_env = data["n_train_env"]
+    n_eval_episodes = int(data["n_eval_eps"])
 
     if not "target_kl" in data:
         # Default target kl for early stopping
@@ -155,6 +156,17 @@ def main(args):
         device=device,
         discrete=bool(data["discrete"])
     )
+    if data["env_name"] == "smacv2":
+        eval_items = [
+            "battle_won",
+            "dead_allies",
+            "dead_enemies"
+        ]
+    elif data["env_name"] == "mamujoco":
+        eval_items = [
+            "reward_run",
+            "reward_ctrl"
+        ]
 
     def show_parameters(model):
         # count the volume of parameters of model
@@ -224,7 +236,7 @@ def main(args):
                         # Finish one episode
                         rollout_info["total_rewards"].append(total_rewards[env_id])
                         print(f"Train [{env_id}]: total rewards: {total_rewards[env_id]}")
-                        for key in infos[env_id][0].keys():
+                        for key in eval_items:
                             rollout_info[key].append(infos[env_id][0][key])
                         rollout_info["total_rewards"].append(total_rewards[env_id])
                         total_rewards[env_id] = 0
@@ -305,7 +317,7 @@ def main(args):
 
             if update % 20 == 0:
                 # Evaluation
-                eval_info = evaluation(eval_env, model, n_eval_episodes)
+                eval_info = evaluation(eval_env, model, n_eval_episodes, eval_items)
                 tag = "eval"
                 global_step = update * n_train_env * time_horizon
                 for k, v in eval_info.items():
@@ -336,7 +348,6 @@ if __name__ == "__main__":
     parser.add_argument("--save-path", type=str, default="hoge")
     parser.add_argument("--config-path", type=str)
     parser.add_argument("--debug", type=bool, default=False)
-    parser.add_argument("--n-eval-episodes", type=int, default=200)
     parser.add_argument(
         "--track",
         type=lambda x: bool(strtobool(x)),

@@ -25,3 +25,4 @@ n_train_env: 40
 n_eval_env: 20
 map_name: HalfCheetah-v2
 discrete: False
+n_eval_eps: 20
