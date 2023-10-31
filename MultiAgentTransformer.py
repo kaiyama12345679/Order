@@ -191,6 +191,11 @@ class MultiAgentTransformer(nn.Module):
         else:
             # Action is already provided
             action_vector = action_seq
+            action_vector = torch.gather(
+                action_vector,
+                dim=-2,
+                index=order.unsqueeze(-1).expand(-1, -1, action_vector.shape[-1]),
+            )
             action_logits = self.decoder(action_vector, order, ordered_enc_state, action_mask)
         if self.discrete:
             prob_dist = Categorical(logits=action_logits)
