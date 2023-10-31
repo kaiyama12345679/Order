@@ -112,7 +112,7 @@ class Decoder(nn.Module):
             )
         else:
             self.decode_embed = nn.Sequential(
-                init_(nn.Linear(action_dim, n_dim, bias=False), activate=True),
+                init_(nn.Linear(action_dim + n_agent, n_dim, bias=False), activate=True),
                 nn.GELU(),
             )
 
