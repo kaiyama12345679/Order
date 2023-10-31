@@ -141,9 +141,6 @@ class MultiAgentTransformer(nn.Module):
 
         ordered_enc_state = ordered_state
 
-        order_probs = Categorical(order_prob)
-        order_logprobs = order_probs.log_prob(order).unsqueeze(-1)
-
         action_mask = torch.gather(
             action_mask,
             dim=-2,
