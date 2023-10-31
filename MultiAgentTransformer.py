@@ -261,10 +261,7 @@ class MultiAgentTransformer(nn.Module):
             ).sum() / batch.active_masks.sum()
         else:
             critic_loss = critic_loss.mean()
-        order_sum_ratio = torch.exp(new_order_logprobs.sum(dim=-2, keepdim=True) - batch.order_logprobs.sum(dim=-2, keepdim=True))
-        order_ratio = torch.exp(new_order_logprobs - batch.order_logprobs)
         n_agent = new_action_logps.shape[-2]
-        order_log_sum = new_order_logprobs.sum(dim=-2, keepdims=True)
         adv = batch.advantages
         normalized_advantages = (adv - adv.mean()) / (adv.std() + 1e-8)
         normalized_advantages = normalized_advantages.mean(dim=-2, keepdim=True)
@@ -273,10 +270,6 @@ class MultiAgentTransformer(nn.Module):
         surr2 = (
             torch.clamp(ratio, 1.0 - self.clip, 1.0 + self.clip) * normalized_advantages
         )
-        order_surr1 = torch.clamp(order_ratio, 1.0 - self.clip, 1.0 + self.clip) * normalized_advantages
-        order_surr2 = order_ratio * normalized_advantages
-
-        order_loss = -torch.min(order_surr1, order_surr2).mean()
         _use_policy_active_masks = True
         ordered_active_masks = torch.gather(
             batch.active_masks,
@@ -300,7 +293,7 @@ class MultiAgentTransformer(nn.Module):
 
         # Total loss
         self.optimizer.zero_grad()
-        loss = critic_loss + actor_loss + (order_loss)
+        loss = critic_loss + actor_loss
         loss.backward()
         grad_norm = nn.utils.clip_grad_norm_(
             self.parameters(), max_norm=self.max_grad_norm
