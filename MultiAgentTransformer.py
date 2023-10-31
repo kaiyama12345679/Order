@@ -121,24 +121,12 @@ class MultiAgentTransformer(nn.Module):
         ordered_enc_state = None
         order = None
         if order_seq is None:
-                   
-            for i in range(n_agent):
-                order_prob = self.pointer(hidden_state, ordered_state, index_seq=order)
-                latest_prob = order_prob[:, -1, :]
-                if deterministic:
-                    a = latest_prob.argmax(dim=-1).unsqueeze(-1).to(torch.int64)
-                else:
-                    lp = Categorical(latest_prob)
-                    a = lp.sample().unsqueeze(-1).to(torch.int64)
-                if order is not None:
-                    order = torch.cat([order, a], dim=-1)
-                else:
-                    order = a
-                ordered_state = torch.gather(
-                    hidden_state,
-                    dim=-2,
-                    index=order.unsqueeze(-1).expand(-1, -1, hidden_state.shape[-1]),
-                )
+            order = torch.stack([torch.randperm(n_agent) for _ in range(n_env)]).to(self.device) 
+            ordered_state = torch.gather(
+                hidden_state,
+                dim=-2,
+                index=order.unsqueeze(-1).expand(-1, -1, hidden_state.shape[-1]),
+            )
         else:
             if len(order_seq.shape) == 3:
                 order_seq = order_seq.squeeze(-1)
@@ -148,9 +136,9 @@ class MultiAgentTransformer(nn.Module):
                 dim=-2,
                 index=order_seq.unsqueeze(-1).expand(-1, -1, hidden_state.shape[-1]),
             )
-            order_prob = self.pointer(hidden_state, ordered_state[:, :-1, :], index_seq=order_seq[:, :-1])
             order = order_seq
         
+        order_logprobs = torch.zeros((n_env, n_agent, 1)).to(state_seq.device)
 
         ordered_enc_state = ordered_state
 
