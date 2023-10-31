@@ -203,7 +203,7 @@ class MultiAgentTransformer(nn.Module):
             index=reversed_index.unsqueeze(-1).expand(-1, -1, action_vector.shape[-1]),
         )
         return action_vector, action_logps, entropy, \
-                order.unsqueeze(-1), order_logprobs, order_probs.entropy(), values
+                order.unsqueeze(-1), order_logprobs, torch.tensor(0), values
     
     def _add_id_vector(self, state_seq: torch.Tensor):
         batch_size, n_agent, state_dim = state_seq.shape
