@@ -65,8 +65,8 @@ def evaluation(
                 # Finish one episode
                 print(f"Eval [{env_id}]: info: {total_rewards[env_id]}")
                 for key in eval_items:
-                    eval_info[key].append(infos[env_id][0][key])
-                
+                    if key in infos[env_id][0]:
+                        eval_info[key].append(infos[env_id][0][key])
                 eval_info["total_rewards"].append(total_rewards[env_id])
                 total_rewards[env_id] = 0
 
@@ -237,7 +237,8 @@ def main(args):
                         rollout_info["total_rewards"].append(total_rewards[env_id])
                         print(f"Train [{env_id}]: total rewards: {total_rewards[env_id]}")
                         for key in eval_items:
-                            rollout_info[key].append(infos[env_id][0][key])
+                            if key in infos[env_id][0]:
+                                rollout_info[key].append(infos[env_id][0][key])
                         rollout_info["total_rewards"].append(total_rewards[env_id])
                         total_rewards[env_id] = 0
 
