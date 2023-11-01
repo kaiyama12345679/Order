@@ -9,6 +9,7 @@ from buffer import Transition
 from valuenorm import ValueNorm
 from typing import Tuple
 import math
+import random
 
 
 class MultiAgentTransformer(nn.Module):
@@ -229,6 +230,8 @@ class MultiAgentTransformer(nn.Module):
 
     def update(self, batch: Transition):
         self.train()
+        # temp = random.randint(0, 1)
+        temp = 0
         # Model forward
         _, new_action_logps, entropy, _, new_order_logprobs, order_entropy, new_values = self.get_action_and_value(
             batch.obs, action_mask=batch.action_masks, action_seq=batch.actions, order_seq=batch.orders
@@ -276,20 +279,37 @@ class MultiAgentTransformer(nn.Module):
             critic_loss = critic_loss.mean()
         order_sum_ratio = torch.exp(new_order_logprobs.sum(dim=-2, keepdim=True) - batch.order_logprobs.sum(dim=-2, keepdim=True))
         order_ratio = torch.exp(new_order_logprobs - batch.order_logprobs)
+        clipped_order_ratio = torch.clamp(order_ratio, 1 - 0.05, 1 + 0.05)
+        clipped_sum_ratio = torch.exp(torch.log(clipped_order_ratio).sum(dim=-2, keepdim=True))
         n_agent = new_action_logps.shape[-2]
         order_log_sum = new_order_logprobs.sum(dim=-2, keepdims=True)
         adv = batch.advantages
         normalized_advantages = (adv - adv.mean()) / (adv.std() + 1e-8)
         normalized_advantages = normalized_advantages.mean(dim=-2, keepdim=True)
         ratio = torch.exp(new_action_logps - batch.action_logprobs)
-        surr1 = ratio * normalized_advantages
-        surr2 = (
-            torch.clamp(ratio, 1.0 - self.clip, 1.0 + self.clip) * normalized_advantages
-        )
-        order_surr1 = torch.clamp(order_ratio, 1.0 - self.clip, 1.0 + self.clip) * normalized_advantages
-        order_surr2 = order_ratio * normalized_advantages
-
-        order_loss = -torch.min(order_surr1, order_surr2).mean()
+        action_sum_ratio = torch.exp(new_action_logps.sum(dim=-2, keepdim=True) - batch.action_logprobs.sum(dim=-2, keepdim=True))
+        if temp == 0:
+            surr1 = ratio * normalized_advantages * order_sum_ratio.detach().clone()
+            surr2 = (
+                torch.clamp(ratio, 1.0 - self.clip, 1.0 + self.clip) * normalized_advantages * order_sum_ratio.detach().clone()
+            )
+            order_surr1 = torch.clamp(clipped_sum_ratio, 1.0 - 0.05, 1.0 + 0.05) * normalized_advantages
+            order_surr2 = clipped_sum_ratio * normalized_advantages 
+            order_surr3 = torch.clamp(order_sum_ratio, 1.0 - 0.05, 1.0 + 0.05) * normalized_advantages
+            order_surr4 = order_sum_ratio * normalized_advantages
+        else:
+            surr1 = ratio * normalized_advantages 
+            surr2 = (
+                torch.clamp(ratio, 1.0 - self.clip, 1.0 + self.clip) * normalized_advantages
+            )
+            order_surr1 = torch.clamp(clipped_sum_ratio, 1.0 - 0.05, 1.0 + 0.05) * normalized_advantages * action_sum_ratio.detach().clone()
+            order_surr2 = clipped_sum_ratio * normalized_advantages * action_sum_ratio.detach().clone()
+            order_surr3 = torch.clamp(order_sum_ratio, 1.0 - 0.05, 1.0 + 0.05) * normalized_advantages * action_sum_ratio.detach().clone()
+            order_surr4 = order_sum_ratio * normalized_advantages * action_sum_ratio.detach().clone()
+            
+        min1_2 = torch.min(order_surr1, order_surr2)
+        min3_4 = torch.min(order_surr3, order_surr4)
+        order_loss = -torch.min(min1_2, min3_4).mean()
         _use_policy_active_masks = True
         ordered_active_masks = torch.gather(
             batch.active_masks,
