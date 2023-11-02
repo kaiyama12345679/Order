@@ -231,7 +231,7 @@ class MultiAgentTransformer(nn.Module):
     def update(self, batch: Transition):
         self.train()
         # temp = random.randint(0, 1)
-        temp = 0
+        temp = 2
         # Model forward
         _, new_action_logps, entropy, _, new_order_logprobs, order_entropy, new_values = self.get_action_and_value(
             batch.obs, action_mask=batch.action_masks, action_seq=batch.actions, order_seq=batch.orders
@@ -297,7 +297,7 @@ class MultiAgentTransformer(nn.Module):
             order_surr2 = clipped_sum_ratio * normalized_advantages 
             order_surr3 = torch.clamp(order_sum_ratio, 1.0 - 0.05, 1.0 + 0.05) * normalized_advantages
             order_surr4 = order_sum_ratio * normalized_advantages
-        else:
+        elif temp == 1:
             surr1 = ratio * normalized_advantages 
             surr2 = (
                 torch.clamp(ratio, 1.0 - self.clip, 1.0 + self.clip) * normalized_advantages
@@ -306,6 +306,15 @@ class MultiAgentTransformer(nn.Module):
             order_surr2 = clipped_sum_ratio * normalized_advantages * action_sum_ratio.detach().clone()
             order_surr3 = torch.clamp(order_sum_ratio, 1.0 - 0.05, 1.0 + 0.05) * normalized_advantages * action_sum_ratio.detach().clone()
             order_surr4 = order_sum_ratio * normalized_advantages * action_sum_ratio.detach().clone()
+        else:
+            surr1 = ratio * normalized_advantages 
+            surr2 = (
+                torch.clamp(ratio, 1.0 - self.clip, 1.0 + self.clip) * normalized_advantages
+            )
+            order_surr1 = torch.clamp(clipped_sum_ratio, 1.0 - 0.05, 1.0 + 0.05) * normalized_advantages 
+            order_surr2 = clipped_sum_ratio * normalized_advantages
+            order_surr3 = torch.clamp(order_sum_ratio, 1.0 - 0.05, 1.0 + 0.05) * normalized_advantages
+            order_surr4 = order_sum_ratio * normalized_advantages
             
         min1_2 = torch.min(order_surr1, order_surr2)
         min3_4 = torch.min(order_surr3, order_surr4)
