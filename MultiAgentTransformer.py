@@ -57,7 +57,7 @@ class MultiAgentTransformer(nn.Module):
         self.num_layer_decoder = num_layer_decoder
         self.device = device
 
-        self.encoder = Encoder(n_dim, n_head, obs_dim, num_layer_encoder).to(device)
+        self.encoder = Encoder(n_dim, n_head, obs_dim + n_agent, num_layer_encoder).to(device)
         self.decoder = Decoder(n_dim, n_head, action_dim, num_layer_decoder, discrete).to(device)
 
         self.optimizer = optim.Adam(self.parameters(), lr=lr, eps=eps)
@@ -88,6 +88,7 @@ class MultiAgentTransformer(nn.Module):
         Returns:
             torch.Tensor: Value prediction for the state sequence.
         """
+        state_seq = self._add_id_vector(state_seq)
         hidden_state, values = self.encoder(state_seq)
         return values
 
@@ -111,6 +112,7 @@ class MultiAgentTransformer(nn.Module):
             tuple: Action vector, action log probabilities, entropy, and value prediction for the state sequence.
         """
         n_env, _, _ = state_seq.shape
+        state_seq = self._add_id_vector(state_seq)
         hidden_state, values = self.encoder(state_seq)
 
         if action_seq is None:
@@ -156,6 +158,12 @@ class MultiAgentTransformer(nn.Module):
             action_logps = prob_dist.log_prob(action_vector)
             entropy = prob_dist.entropy()
         return action_vector, action_logps, entropy, values
+
+    def _add_id_vector(self, state_seq: torch.Tensor):
+        batch_size, n_agent, state_dim = state_seq.shape
+        id_vector = torch.eye(n_agent).unsqueeze(0).expand(batch_size, -1, -1).to(state_seq.device)
+        state_seq = torch.cat([state_seq, id_vector], dim=-1)
+        return state_seq
 
     def update(self, batch: Transition):
         self.train()
