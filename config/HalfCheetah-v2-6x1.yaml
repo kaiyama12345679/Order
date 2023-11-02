@@ -22,7 +22,7 @@ huber_delta: 10.0
 n_ppo_update: 10
 time_horizon: 100
 n_train_env: 40
-n_eval_env: 20
+n_eval_env: 50
 map_name: HalfCheetah-v2
 discrete: False
-n_eval_eps: 20
+n_eval_eps: 200
