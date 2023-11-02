@@ -16,7 +16,7 @@ env_args:
 n_steps: 1e7
 max_grad_norm: 10
 huber_delta: 10.0
-n_ppo_update: 15
+n_ppo_update: 10
 time_horizon: 100
 n_train_env: 32
 n_eval_env: 20
