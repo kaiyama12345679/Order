@@ -96,25 +96,38 @@ class EncoderBlock(nn.Module):
 
 
 class Decoder(nn.Module):
-    def __init__(self, n_dim, n_head, n_agent, action_dim, num_decoder_layer, discrete=True) -> None:
+    def __init__(self, n_dim, n_head, n_agent, action_dim, num_decoder_layer, discrete=True, use_action_id=False) -> None:
         super().__init__()
 
         self.n_dim = n_dim
         self.n_head = n_head
         self.action_dim = action_dim
         self.num_decoder_layer = num_decoder_layer
+        self.use_action_id = use_action_id
 
         # self.decode_embed = nn.Embedding(action_dim + 1, n_dim)   # Equivalent except for init and GELU?
         if discrete:
-            self.decode_embed = nn.Sequential(
-                init_(nn.Linear(action_dim + 1 + n_agent, n_dim, bias=False), activate=True),
+            if self.use_action_id:
+                self.decode_embed = nn.Sequential(
+                    init_(nn.Linear(action_dim + 1 + n_agent, n_dim, bias=False), activate=True),
+                    nn.GELU(),
+                )
+            else:
+                self.decode_embed = nn.Sequential(
+                init_(nn.Linear(action_dim + 1, n_dim, bias=False), activate=True),
                 nn.GELU(),
             )
         else:
-            self.decode_embed = nn.Sequential(
-                init_(nn.Linear(action_dim + n_agent, n_dim, bias=False), activate=True),
-                nn.GELU(),
-            )
+            if self.use_action_id:
+                self.decode_embed = nn.Sequential(
+                    init_(nn.Linear(action_dim + n_agent, n_dim, bias=False), activate=True),
+                    nn.GELU(),
+                )
+            else:
+                self.decode_embed = nn.Sequential(
+                    init_(nn.Linear(action_dim, n_dim, bias=False), activate=True),
+                    nn.GELU(),
+                )
 
         self.ln = nn.LayerNorm(n_dim)
 
@@ -152,10 +165,16 @@ class Decoder(nn.Module):
         one_hot_order_seq = F.one_hot(order.to(torch.int64), num_classes=n_agent)
         if self.discrete:
             one_hot_action_seq = F.one_hot(action_seq.squeeze(-1).to(torch.int64), num_classes=self.action_dim + 1)
-            concat_seq = torch.cat([one_hot_action_seq.to(dtype=torch.float), one_hot_order_seq.to(dtype=torch.float)], dim=-1)
+            if self.use_action_id:
+                concat_seq = torch.cat([one_hot_action_seq.to(dtype=torch.float), one_hot_order_seq.to(dtype=torch.float)], dim=-1)
+            else:
+                concat_seq = one_hot_action_seq
             action_embed_seq = self.decode_embed(concat_seq)
         else:
-            concat_seq = torch.cat([action_seq, one_hot_order_seq.to(dtype=torch.float)], dim=-1)
+            if self.use_action_id:
+                concat_seq = torch.cat([action_seq, one_hot_order_seq.to(dtype=torch.float)], dim=-1)
+            else:
+                concat_seq = action_seq
             action_embed_seq = self.decode_embed(concat_seq)
         action_embed_seq = self.ln(action_embed_seq)
 
