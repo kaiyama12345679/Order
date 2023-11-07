@@ -342,7 +342,7 @@ class MultiAgentTransformer(nn.Module):
 
         # Total loss
         self.optimizer.zero_grad()
-        loss = critic_loss + actor_loss + (order_loss)
+        loss = critic_loss + actor_loss + (order_loss / 10.)
         loss.backward()
         grad_norm = nn.utils.clip_grad_norm_(
             self.parameters(), max_norm=self.max_grad_norm
