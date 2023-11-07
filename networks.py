@@ -169,13 +169,13 @@ class Decoder(nn.Module):
                 concat_seq = torch.cat([one_hot_action_seq.to(dtype=torch.float), one_hot_order_seq.to(dtype=torch.float)], dim=-1)
             else:
                 concat_seq = one_hot_action_seq
-            action_embed_seq = self.decode_embed(concat_seq)
+            action_embed_seq = self.decode_embed(concat_seq.float())
         else:
             if self.use_action_id:
                 concat_seq = torch.cat([action_seq, one_hot_order_seq.to(dtype=torch.float)], dim=-1)
             else:
                 concat_seq = action_seq
-            action_embed_seq = self.decode_embed(concat_seq)
+            action_embed_seq = self.decode_embed(concat_seq.float())
         action_embed_seq = self.ln(action_embed_seq)
 
         for decoder in self.decoder:
