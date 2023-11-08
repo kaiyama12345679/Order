@@ -59,9 +59,10 @@ class MultiAgentTransformer(nn.Module):
         self.num_layer_decoder = num_layer_decoder
         self.device = device
 
-        self.encoder = Encoder(n_dim, n_head, obs_dim + n_agent, num_layer_encoder).to(device)
-        self.decoder = Decoder(n_dim, n_head, n_agent, action_dim, num_layer_decoder, discrete).to(device)
+        self.encoder = Encoder(n_dim, n_head, obs_dim, num_layer_encoder).to(device)
+        self.decoder = Decoder(n_dim, n_head, n_agent, action_dim, num_layer_decoder, discrete, use_action_id=False).to(device)
         self.pointer = Pointer(n_dim=n_dim).to(device)
+        self.order_encoder = OrderedEncoder(n_dim, n_agent, is_causal=False).to(device)
 
         self.optimizer = optim.Adam(self.parameters(), lr=lr, eps=eps)
         self.gamma = gamma
@@ -90,7 +91,6 @@ class MultiAgentTransformer(nn.Module):
         Returns:
             torch.Tensor: Value prediction for the state sequence.
         """
-        state_seq = self._add_id_vector(state_seq)
         hidden_state, values = self.encoder(state_seq)
         return values
 
@@ -115,7 +115,6 @@ class MultiAgentTransformer(nn.Module):
             tuple: Action vector, action log probabilities, entropy, and value prediction for the state sequence.
         """
         n_env, n_agent, _ = state_seq.shape
-        state_seq = self._add_id_vector(state_seq)
         hidden_state, values = self.encoder(state_seq)
 
         ordered_state = None
@@ -152,9 +151,8 @@ class MultiAgentTransformer(nn.Module):
             order_prob = self.pointer(hidden_state, ordered_state[:, :-1, :], index_seq=order_seq[:, :-1])
             order = order_seq
         
-
-        ordered_enc_state = ordered_state
-
+        ordered_state = self._add_id_vector(ordered_state)
+        ordered_enc_state = self.order_encoder(ordered_state)
         order_probs = Categorical(order_prob)
         order_logprobs = order_probs.log_prob(order).unsqueeze(-1)
 

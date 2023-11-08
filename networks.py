@@ -282,17 +282,21 @@ class Pointer(nn.Module):
     
 
 class OrderedEncoder(nn.Module):
-    def __init__(self, n_dim, is_causal=True):
+    def __init__(self, n_dim, n_agent, is_causal=True):
         super().__init__()
+        self.emb = nn.Sequential(
+            nn.LayerNorm(n_dim + n_agent),
+            init_(nn.Linear(n_dim + n_agent, n_dim), activate=True),
+            nn.GELU(),
+        )
         self.encoder = EncoderBlock(n_dim, n_head=1, is_causal=is_causal)
     
-    def forward(self, state_seq: torch.Tensor, ordered_seq=None):
-        batch_size, n_agent, seq_len = state_seq.shape
+    def forward(self, ordered_seq=None):
+        batch_size, n_agent, seq_len = ordered_seq.shape
         
         net_input = ordered_seq
         if net_input is not None:
-            pe = positional_encoding(net_input.shape[1], net_input.shape[-1], net_input.device)
-            net_input = math.sqrt(net_input.shape[-1]) * net_input + pe
+            net_input = self.emb(net_input)
             x = self.encoder(net_input)
             return x
         else:
