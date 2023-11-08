@@ -167,6 +167,10 @@ def main(args):
             "reward_run",
             "reward_ctrl"
         ]
+    elif data["env_name"] == "football":
+        eval_items = [
+            "score_reward"
+        ]
 
     def show_parameters(model):
         # count the volume of parameters of model
@@ -338,7 +342,7 @@ def main(args):
         if args.track:
             wandb.finish()
         if not debug:
-            model.save_model(save_dir)
+            model.save_model(save_dir + "final")
             with open(save_dir + "train.yaml", "w") as f:
                 yaml.safe_dump(data, f)
 
