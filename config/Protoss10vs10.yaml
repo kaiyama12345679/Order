@@ -13,7 +13,7 @@ train_seed: 1024
 eval_seed: 1024
 env_args:
     map_name: protoss_10_vs_10
-n_steps: 1e7
+n_steps: 15e6
 max_grad_norm: 10
 huber_delta: 10.0
 n_ppo_update: 10
