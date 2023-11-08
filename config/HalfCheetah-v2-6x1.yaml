@@ -16,7 +16,7 @@ env_args:
     agent_conf: 6x1
     agent_obsk: 0 # We use the fully observable setting, so this argument is not useful. But we still keep it.
     episode_limit: 1000
-n_steps: 1e7
+n_steps: 15e6
 max_grad_norm: 0.5
 huber_delta: 10.0
 n_ppo_update: 10
