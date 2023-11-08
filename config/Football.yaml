@@ -36,7 +36,7 @@ n_ppo_update: 10
 time_horizon: 200
 n_train_env: 20
 n_eval_env: 50
-map_name: HalfCheetah-v2
+map_name: academy_pass_and_shoot_with_keeper
 discrete: True
 n_eval_eps: 200
 
