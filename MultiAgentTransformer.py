@@ -75,6 +75,7 @@ class MultiAgentTransformer(nn.Module):
         self.obs_dim = obs_dim
         self.action_dim = action_dim
         self.discrete = discrete
+        self.order_clip = 0.2
 
         # Normal axes should be 2
         self.value_normalizer = ValueNorm(
@@ -291,27 +292,27 @@ class MultiAgentTransformer(nn.Module):
             surr2 = (
                 torch.clamp(ratio, 1.0 - self.clip, 1.0 + self.clip) * normalized_advantages * order_sum_ratio.detach().clone()
             )
-            order_surr1 = torch.clamp(clipped_sum_ratio, 1.0 - 0.05, 1.0 + 0.05) * normalized_advantages
+            order_surr1 = torch.clamp(clipped_sum_ratio, 1.0 - self.order_clip, 1.0 + self.order_clip) * normalized_advantages
             order_surr2 = clipped_sum_ratio * normalized_advantages 
-            order_surr3 = torch.clamp(order_sum_ratio, 1.0 - 0.05, 1.0 + 0.05) * normalized_advantages
+            order_surr3 = torch.clamp(order_sum_ratio, 1.0 - self.order_clip, 1.0 + self.order_clip) * normalized_advantages
             order_surr4 = order_sum_ratio * normalized_advantages
         elif temp == 1:
             surr1 = ratio * normalized_advantages 
             surr2 = (
                 torch.clamp(ratio, 1.0 - self.clip, 1.0 + self.clip) * normalized_advantages
             )
-            order_surr1 = torch.clamp(clipped_sum_ratio, 1.0 - 0.05, 1.0 + 0.05) * normalized_advantages * action_sum_ratio.detach().clone()
+            order_surr1 = torch.clamp(clipped_sum_ratio, 1.0 - self.order_clip, 1.0 + self.order_clip) * normalized_advantages * action_sum_ratio.detach().clone()
             order_surr2 = clipped_sum_ratio * normalized_advantages * action_sum_ratio.detach().clone()
-            order_surr3 = torch.clamp(order_sum_ratio, 1.0 - 0.05, 1.0 + 0.05) * normalized_advantages * action_sum_ratio.detach().clone()
+            order_surr3 = torch.clamp(order_sum_ratio, 1.0 - self.order_clip, 1.0 + self.order_clip) * normalized_advantages * action_sum_ratio.detach().clone()
             order_surr4 = order_sum_ratio * normalized_advantages * action_sum_ratio.detach().clone()
         else:
             surr1 = ratio * normalized_advantages 
             surr2 = (
                 torch.clamp(ratio, 1.0 - self.clip, 1.0 + self.clip) * normalized_advantages
             )
-            order_surr1 = torch.clamp(clipped_sum_ratio, 1.0 - 0.05, 1.0 + 0.05) * normalized_advantages 
+            order_surr1 = torch.clamp(clipped_sum_ratio, 1.0 - self.order_clip, 1.0 + self.order_clip) * normalized_advantages 
             order_surr2 = clipped_sum_ratio * normalized_advantages
-            order_surr3 = torch.clamp(order_sum_ratio, 1.0 - 0.05, 1.0 + 0.05) * normalized_advantages
+            order_surr3 = torch.clamp(order_sum_ratio, 1.0 - self.order_clip, 1.0 + self.order_clip) * normalized_advantages
             order_surr4 = order_sum_ratio * normalized_advantages
             
         min1_2 = torch.min(order_surr1, order_surr2)
