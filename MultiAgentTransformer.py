@@ -31,6 +31,7 @@ class MultiAgentTransformer(nn.Module):
         huber_delta: float,
         device: torch.device,
         discrete = True,
+        use_agent_id = True
     ) -> None:
         """
         Initialize MultiAgentTransformer.
@@ -58,8 +59,11 @@ class MultiAgentTransformer(nn.Module):
         self.num_layer_encoder = num_layer_encoder
         self.num_layer_decoder = num_layer_decoder
         self.device = device
-
-        self.encoder = Encoder(n_dim, n_head, obs_dim + n_agent, num_layer_encoder).to(device)
+        self.use_agent_id = use_agent_id
+        if self.use_agent_id:
+            self.encoder = Encoder(n_dim, n_head, obs_dim + n_agent, num_layer_encoder).to(device)
+        else:
+            self.encoder = Encoder(n_dim, n_agent, obs_dim, num_layer_encoder).to(device)
         self.decoder = Decoder(n_dim, n_head, n_agent, action_dim, num_layer_decoder, discrete).to(device)
         self.pointer = Pointer(n_dim=n_dim).to(device)
 
@@ -91,7 +95,8 @@ class MultiAgentTransformer(nn.Module):
         Returns:
             torch.Tensor: Value prediction for the state sequence.
         """
-        state_seq = self._add_id_vector(state_seq)
+        if self.use_agent_id:
+            state_seq = self._add_id_vector(state_seq)
         hidden_state, values = self.encoder(state_seq)
         return values
 
@@ -116,7 +121,8 @@ class MultiAgentTransformer(nn.Module):
             tuple: Action vector, action log probabilities, entropy, and value prediction for the state sequence.
         """
         n_env, n_agent, _ = state_seq.shape
-        state_seq = self._add_id_vector(state_seq)
+        if self.use_agent_id:
+            state_seq = self._add_id_vector(state_seq)
         hidden_state, values = self.encoder(state_seq)
 
         ordered_state = None
