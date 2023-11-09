@@ -31,7 +31,7 @@ class MultiAgentTransformer(nn.Module):
         huber_delta: float,
         device: torch.device,
         discrete = True,
-        use_agent_id = True
+        use_agent_id = False
     ) -> None:
         """
         Initialize MultiAgentTransformer.
@@ -63,7 +63,7 @@ class MultiAgentTransformer(nn.Module):
         if self.use_agent_id:
             self.encoder = Encoder(n_dim, n_head, obs_dim + n_agent, num_layer_encoder).to(device)
         else:
-            self.encoder = Encoder(n_dim, n_agent, obs_dim, num_layer_encoder).to(device)
+            self.encoder = Encoder(n_dim, n_head, obs_dim, num_layer_encoder).to(device)
         self.decoder = Decoder(n_dim, n_head, n_agent, action_dim, num_layer_decoder, discrete).to(device)
         self.pointer = Pointer(n_dim=n_dim).to(device)
 
