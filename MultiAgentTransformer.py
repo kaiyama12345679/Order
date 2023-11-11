@@ -60,7 +60,7 @@ class MultiAgentTransformer(nn.Module):
         self.device = device
 
         self.encoder = Encoder(n_dim, n_head, obs_dim, num_layer_encoder).to(device)
-        self.decoder = Decoder(n_dim, n_head, n_agent, action_dim, num_layer_decoder, discrete, use_action_id=False).to(device)
+        self.decoder = Decoder(n_dim, n_head, n_agent, action_dim, num_layer_decoder, discrete, use_action_id=True).to(device)
         self.pointer = Pointer(n_dim=n_dim).to(device)
         self.order_encoder = OrderedEncoder(n_dim, n_agent).to(device)
 
@@ -341,7 +341,7 @@ class MultiAgentTransformer(nn.Module):
 
         # Total loss
         self.optimizer.zero_grad()
-        loss = critic_loss + actor_loss + (order_loss / 10.)
+        loss = critic_loss + actor_loss + (order_loss)
         loss.backward()
         grad_norm = nn.utils.clip_grad_norm_(
             self.parameters(), max_norm=self.max_grad_norm
