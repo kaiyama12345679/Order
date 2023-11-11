@@ -31,7 +31,7 @@ class MultiAgentTransformer(nn.Module):
         huber_delta: float,
         device: torch.device,
         discrete = True,
-        use_agent_id = False
+        use_agent_id = True
     ) -> None:
         """
         Initialize MultiAgentTransformer.
@@ -64,7 +64,7 @@ class MultiAgentTransformer(nn.Module):
             self.encoder = Encoder(n_dim, n_head, obs_dim + n_agent, num_layer_encoder).to(device)
         else:
             self.encoder = Encoder(n_dim, n_head, obs_dim, num_layer_encoder).to(device)
-        self.decoder = Decoder(n_dim, n_head, n_agent, action_dim, num_layer_decoder, discrete).to(device)
+        self.decoder = Decoder(n_dim, n_head, n_agent, action_dim, num_layer_decoder, discrete, use_action_id=True).to(device)
         self.pointer = Pointer(n_dim=n_dim).to(device)
 
         self.optimizer = optim.Adam(self.parameters(), lr=lr, eps=eps)
@@ -303,7 +303,7 @@ class MultiAgentTransformer(nn.Module):
         else:
             raise ValueError("temp value is exception")
         
-        order_loss = (normalized_advantages * new_order_logprobs.mean(dim=-2, keepdim=True)).mean()
+        order_loss = -(normalized_advantages * new_order_logprobs.mean(dim=-2, keepdim=True)).mean()
         _use_policy_active_masks = True
         ordered_active_masks = torch.gather(
             batch.active_masks,
@@ -327,7 +327,7 @@ class MultiAgentTransformer(nn.Module):
 
         # Total loss
         self.optimizer.zero_grad()
-        loss = critic_loss + actor_loss + (order_loss / 10.)
+        loss = critic_loss + actor_loss + (order_loss)
         loss.backward()
         grad_norm = nn.utils.clip_grad_norm_(
             self.parameters(), max_norm=self.max_grad_norm
