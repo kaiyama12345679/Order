@@ -1,3 +1,9 @@
+n_dim: 64
+n_head: 1
+num_layer_encoder: 1
+num_layer_decoder: 1
+gamma: 0.99
+tau: 0.95
 clip: 0.05
 lr: 5e-5
 eps: 1e-5
