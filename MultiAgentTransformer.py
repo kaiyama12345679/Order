@@ -286,8 +286,6 @@ class MultiAgentTransformer(nn.Module):
             critic_loss = critic_loss.mean()
         order_sum_ratio = torch.exp(new_order_logprobs.sum(dim=-2, keepdim=True) - batch.order_logprobs.sum(dim=-2, keepdim=True))
         order_ratio = torch.exp(new_order_logprobs - batch.order_logprobs)
-        clipped_order_ratio = torch.clamp(order_ratio, 1 - 0.05, 1 + 0.05)
-        clipped_sum_ratio = torch.exp(torch.log(clipped_order_ratio).sum(dim=-2, keepdim=True))
         n_agent = new_action_logps.shape[-2]
         order_log_sum = new_order_logprobs.sum(dim=-2, keepdims=True)
         adv = batch.advantages
@@ -295,37 +293,13 @@ class MultiAgentTransformer(nn.Module):
         normalized_advantages = normalized_advantages.mean(dim=-2, keepdim=True)
         ratio = torch.exp(new_action_logps - batch.action_logprobs)
         action_sum_ratio = torch.exp(new_action_logps.sum(dim=-2, keepdim=True) - batch.action_logprobs.sum(dim=-2, keepdim=True))
-        if temp == 0:
-            surr1 = ratio * normalized_advantages * order_sum_ratio.detach().clone()
-            surr2 = (
-                torch.clamp(ratio, 1.0 - self.clip, 1.0 + self.clip) * normalized_advantages * order_sum_ratio.detach().clone()
-            )
-            order_surr1 = torch.clamp(clipped_sum_ratio, 1.0 - self.order_clip, 1.0 + self.order_clip) * normalized_advantages
-            order_surr2 = clipped_sum_ratio * normalized_advantages 
-            order_surr3 = torch.clamp(order_sum_ratio, 1.0 - self.order_clip, 1.0 + self.order_clip) * normalized_advantages
-            order_surr4 = order_sum_ratio * normalized_advantages
-        elif temp == 1:
-            surr1 = ratio * normalized_advantages 
-            surr2 = (
-                torch.clamp(ratio, 1.0 - self.clip, 1.0 + self.clip) * normalized_advantages
-            )
-            order_surr1 = torch.clamp(clipped_sum_ratio, 1.0 - self.order_clip, 1.0 + self.order_clip) * normalized_advantages * action_sum_ratio.detach().clone()
-            order_surr2 = clipped_sum_ratio * normalized_advantages * action_sum_ratio.detach().clone()
-            order_surr3 = torch.clamp(order_sum_ratio, 1.0 - self.order_clip, 1.0 + self.order_clip) * normalized_advantages * action_sum_ratio.detach().clone()
-            order_surr4 = order_sum_ratio * normalized_advantages * action_sum_ratio.detach().clone()
-        else:
-            surr1 = ratio * normalized_advantages 
-            surr2 = (
-                torch.clamp(ratio, 1.0 - self.clip, 1.0 + self.clip) * normalized_advantages
-            )
-            order_surr1 = torch.clamp(clipped_sum_ratio, 1.0 - self.order_clip, 1.0 + self.order_clip) * normalized_advantages 
-            order_surr2 = clipped_sum_ratio * normalized_advantages
-            order_surr3 = torch.clamp(order_sum_ratio, 1.0 - self.order_clip, 1.0 + self.order_clip) * normalized_advantages
-            order_surr4 = order_sum_ratio * normalized_advantages
-            
-        min1_2 = torch.min(order_surr1, order_surr2)
-        min3_4 = torch.min(order_surr3, order_surr4)
-        order_loss = -torch.min(min1_2, min3_4).mean()
+        surr1 = torch.clamp(ratio, 1.0 - self.clip, 1.0 + self.clip) * normalized_advantages
+        surr2 = ratio * normalized_advantages
+        hosei_advangages = gen_clipvalue(n_agent, alpha=0.5, device=normalized_advantages.device, step=-1) * normalized_advantages
+        clips = gen_clipvalue(n_agent, 0.5, normalized_advantages.device, step=1) * 0.3
+        order_surr1 = torch.clamp(order_ratio, 1.0 - clips, 1.0 + clips) * hosei_advangages
+        order_surr2 = order_ratio * hosei_advangages
+        order_loss = -torch.min(order_surr1, order_surr2).mean()
         _use_policy_active_masks = True
         ordered_active_masks = torch.gather(
             batch.active_masks,
@@ -402,3 +376,13 @@ class MultiAgentTransformer(nn.Module):
             path (str): Path to save the model.
         """
         torch.save(self.state_dict(), path + ".pt")
+
+def gen_clipvalue(n_agent: int, alpha: float, device: torch.device, step=-1):
+    assert alpha >= 0
+    if step == -1:
+        clips = (torch.arange(start=n_agent, end=0, step=-1).unsqueeze(-1).unsqueeze(0) / n_agent).pow(alpha).to(device)
+    elif step == 1:
+        clips = (torch.arange(start=1, end=n_agent + 1, step=1).unsqueeze(-1).unsqueeze(0) / n_agent).pow(alpha).to(device)
+    else:
+        raise ValueError("step value is invalid.")
+    return clips    
