@@ -246,7 +246,7 @@ class Pointer(nn.Module):
         self.mha_enc = nn.MultiheadAttention(n_dim, num_heads=1, batch_first=True)
         self.mha = nn.MultiheadAttention(n_dim, num_heads=1, batch_first=True)
         self.vl = nn.Parameter(torch.randn(1, 1, n_dim))
-        # self.Wq = nn.Linear(3 * n_dim, n_dim, bias=False)
+        self.Wq = nn.Linear(3 * n_dim, n_dim, bias=False)
         init_mha_(self.mha)
         init_mha_(self.mha_enc)
         
@@ -270,11 +270,11 @@ class Pointer(nn.Module):
             v = self.vl.expand(batch_size, -1, -1)
         else:
             v = torch.concat([self.vl.expand(batch_size, -1, -1), ordered_seq], dim=-2)
-        # f = positional_encoding(length + 1, n_dim, state_seq.device).expand(batch_size, -1, -1)
+        f = positional_encoding(length + 1, n_dim, state_seq.device).expand(batch_size, -1, -1)
 
-        # h = torch.concat([mean_state.expand(-1, length + 1, -1), v, f], dim=-1)
-        # q0 = self.Wq(h)
-        q1, _ = self.mha_enc(v, state_seq, state_seq, attn_mask = prob_mask)
+        h = torch.concat([mean_state.expand(-1, length + 1, -1), v, f], dim=-1)
+        q0 = self.Wq(h)
+        q1, _ = self.mha_enc(q0, state_seq, state_seq, attn_mask = prob_mask)
         _, prob = self.mha(q1, state_seq, state_seq, attn_mask = prob_mask)
         return prob
         

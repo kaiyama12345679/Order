@@ -295,11 +295,11 @@ class MultiAgentTransformer(nn.Module):
         action_sum_ratio = torch.exp(new_action_logps.sum(dim=-2, keepdim=True) - batch.action_logprobs.sum(dim=-2, keepdim=True))
         surr1 = torch.clamp(ratio, 1.0 - self.clip, 1.0 + self.clip) * normalized_advantages
         surr2 = ratio * normalized_advantages
-        hosei_advangages = gen_clipvalue(n_agent, alpha=0.5, device=normalized_advantages.device, step=-1) * normalized_advantages
-        clips = gen_clipvalue(n_agent, 0.5, normalized_advantages.device, step=1) * 0.3
+        hosei_advangages = gen_clipvalue(n_agent, alpha=2, device=normalized_advantages.device, step=-1) * normalized_advantages
+        clips = gen_clipvalue(n_agent, 1, normalized_advantages.device, step=1) * 0.3
         order_surr1 = torch.clamp(order_ratio, 1.0 - clips, 1.0 + clips) * hosei_advangages
         order_surr2 = order_ratio * hosei_advangages
-        order_loss = -torch.min(order_surr1, order_surr2).mean()
+        order_loss = -torch.min(order_surr1, order_surr2).mean() - self.entropy_coef * order_entropy.mean()
         _use_policy_active_masks = True
         ordered_active_masks = torch.gather(
             batch.active_masks,
