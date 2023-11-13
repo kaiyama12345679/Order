@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 import numpy as np
 from torch.distributions import Categorical, Normal
-from networks import Encoder, Decoder, Pointer, OrderedEncoder, positional_encoding
+from networks import Encoder, Decoder, Pointer, OrderedEncoder, positional_encoding, Transformer_Pointer
 from buffer import Transition
 from valuenorm import ValueNorm
 from typing import Tuple
@@ -65,7 +65,7 @@ class MultiAgentTransformer(nn.Module):
         else:
             self.encoder = Encoder(n_dim, n_head, obs_dim, num_layer_encoder).to(device)
         self.decoder = Decoder(n_dim, n_head, n_agent, action_dim, num_layer_decoder, discrete, use_action_id=True).to(device)
-        self.pointer = Pointer(n_dim=n_dim).to(device)
+        self.pointer = Transformer_Pointer(n_dim, 1).to(device)
 
         self.optimizer = optim.Adam(self.parameters(), lr=lr, eps=eps)
         self.gamma = gamma
@@ -238,7 +238,7 @@ class MultiAgentTransformer(nn.Module):
     def update(self, batch: Transition):
         self.train()
         # temp = random.randint(0, 1)
-        temp = 2
+        temp = "half"
         # Model forward
         _, new_action_logps, entropy, _, new_order_logprobs, order_entropy, new_values = self.get_action_and_value(
             batch.obs, action_mask=batch.action_masks, action_seq=batch.actions, order_seq=batch.orders
@@ -293,13 +293,26 @@ class MultiAgentTransformer(nn.Module):
         normalized_advantages = normalized_advantages.mean(dim=-2, keepdim=True)
         ratio = torch.exp(new_action_logps - batch.action_logprobs)
         action_sum_ratio = torch.exp(new_action_logps.sum(dim=-2, keepdim=True) - batch.action_logprobs.sum(dim=-2, keepdim=True))
-        surr1 = torch.clamp(ratio, 1.0 - self.clip, 1.0 + self.clip) * normalized_advantages
-        surr2 = ratio * normalized_advantages
         hosei_advangages = gen_clipvalue(n_agent, alpha=2, device=normalized_advantages.device, step=-1) * normalized_advantages
-        clips = gen_clipvalue(n_agent, 1, normalized_advantages.device, step=1) * 0.3
-        order_surr1 = torch.clamp(order_ratio, 1.0 - clips, 1.0 + clips) * hosei_advangages
-        order_surr2 = order_ratio * hosei_advangages
-        order_loss = -torch.min(order_surr1, order_surr2).mean() - self.entropy_coef * order_entropy.mean()
+        clips = gen_clipvalue(n_agent, 0, normalized_advantages.device, step=1) * 0.05
+        if temp == "no":
+            surr1 = torch.clamp(ratio, 1.0 - self.clip, 1.0 + self.clip) * normalized_advantages
+            surr2 = ratio * normalized_advantages
+            order_surr1 = torch.clamp(order_ratio, 1.0 - clips, 1.0 + clips) * hosei_advangages
+            order_surr2 = order_ratio * hosei_advangages 
+        elif temp == "half":
+            surr1 = torch.clamp(ratio, 1.0 - self.clip, 1.0 + self.clip) * normalized_advantages * order_sum_ratio.detach().clone()
+            surr2 = ratio * normalized_advantages * order_sum_ratio.detach().clone()
+            order_surr1 = torch.clamp(order_ratio, 1.0 - clips, 1.0 + clips) * hosei_advangages
+            order_surr2 = order_ratio * hosei_advangages 
+        elif temp == "both":
+            surr1 = torch.clamp(ratio, 1.0 - self.clip, 1.0 + self.clip) * normalized_advantages * order_sum_ratio.detach().clone()
+            surr2 = ratio * normalized_advantages * order_sum_ratio.detach().clone()
+            order_surr1 = torch.clamp(order_ratio, 1.0 - clips, 1.0 + clips) * hosei_advangages * action_sum_ratio.detach().clone()
+            order_surr2 = order_ratio * hosei_advangages * action_sum_ratio.detach().clone()
+        else:
+            raise ValueError("temp value is invalid")
+        order_loss = -torch.min(order_surr1, order_surr2).mean()
         _use_policy_active_masks = True
         ordered_active_masks = torch.gather(
             batch.active_masks,

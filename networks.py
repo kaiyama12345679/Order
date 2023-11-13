@@ -177,6 +177,8 @@ class Decoder(nn.Module):
                 concat_seq = action_seq
             action_embed_seq = self.decode_embed(concat_seq.float())
         action_embed_seq = self.ln(action_embed_seq)
+        # pe = positional_encoding(action_embed_seq.shape[-2], action_embed_seq.shape[-1], action_embed_seq.device)
+        # action_embed_seq = action_embed_seq + pe
 
         for decoder in self.decoder:
             action_embed_seq = decoder(tgt=hidden_state, src=action_embed_seq)
@@ -278,6 +280,72 @@ class Pointer(nn.Module):
         _, prob = self.mha(q1, state_seq, state_seq, attn_mask = prob_mask)
         return prob
         
+class Transformer_Pointer(nn.Module):
+    C = 10
+    def __init__(self, n_dim, n_head):
+        super().__init__()
+
+        self.n_dim = n_dim
+        self.n_head = n_head
+        self.bos = nn.Parameter(torch.randn(1, 1, n_dim))
+
+        self.mha_self = nn.MultiheadAttention(
+            embed_dim=n_dim, num_heads=n_head, batch_first=True
+        )
+        self.mha_srctgt = nn.MultiheadAttention(
+            embed_dim=n_dim, num_heads=n_head, batch_first=True
+        )
+        # Init weight
+        init_mha_(self.mha_self)
+        init_mha_(self.mha_srctgt)
+
+        self.norm1 = nn.LayerNorm(n_dim)
+        self.norm2 = nn.LayerNorm(n_dim)
+        self.Wq = nn.Linear(n_dim, n_dim)
+        self.Wk = nn.Linear(n_dim, n_dim)
+
+    def forward(self, state_seq, ordered_seq=None, index_seq=None):
+
+        batch_size, n_agent, n_dim = state_seq.shape
+        length = index_seq.shape[-1] if (index_seq is not None) else 0
+
+        prob_mask = torch.zeros((batch_size, 1, n_agent), device=state_seq.device)
+        if index_seq is not None:
+            for i in range(index_seq.shape[1]):
+                latest_mask = prob_mask[:, -1, :] + F.one_hot(
+                    index_seq[:, i], num_classes=n_agent
+                )
+                prob_mask = torch.cat([prob_mask, latest_mask.unsqueeze(1)], dim=-2)
+        prob_mask = prob_mask.bool()
+
+        if ordered_seq is None:
+            v = self.bos.expand(batch_size, -1, -1)
+        else:
+            v = torch.concat([self.bos.expand(batch_size, -1, -1), ordered_seq], dim=-2)
+
+        pe = positional_encoding(v.shape[-2], n_dim, v.device)
+        v = pe + v
+
+        ones = torch.ones(v.shape[1], v.shape[1]).to(v.device)
+        self_mask = torch.triu(ones, diagonal=1).bool()
+
+        selfattn_output, _ = self.mha_self(v, v, v, attn_mask=self_mask)
+        v = self.norm1(selfattn_output + v)
+        srctgtattn_output, _ = self.mha_srctgt(v, state_seq, state_seq, attn_mask=prob_mask)
+        v = self.norm2(srctgtattn_output + v)
+        q = self.Wq(v)
+        k = self.Wk(state_seq)
+        attn_weights = torch.tanh(torch.bmm(q, k.transpose(1, 2))) * Transformer_Pointer.C
+        prob = torch.softmax(attn_weights - prob_mask * 1e9, dim=-1)
+        return prob[:, :n_agent, :]
+
+
+
+
+
+
+
+        
         
     
 
@@ -292,7 +360,7 @@ class OrderedEncoder(nn.Module):
         net_input = ordered_seq
         if net_input is not None:
             pe = positional_encoding(net_input.shape[1], net_input.shape[-1], net_input.device)
-            net_input = math.sqrt(net_input.shape[-1]) * net_input + pe
+            net_input = net_input + pe
             x = self.encoder(net_input)
             return x
         else:
