@@ -238,7 +238,7 @@ class MultiAgentTransformer(nn.Module):
     def update(self, batch: Transition):
         self.train()
         # temp = random.randint(0, 1)
-        temp = "half"
+        temp = "no"
         # Model forward
         _, new_action_logps, entropy, _, new_order_logprobs, order_entropy, new_values = self.get_action_and_value(
             batch.obs, action_mask=batch.action_masks, action_seq=batch.actions, order_seq=batch.orders
@@ -284,35 +284,25 @@ class MultiAgentTransformer(nn.Module):
             ).sum() / batch.active_masks.sum()
         else:
             critic_loss = critic_loss.mean()
-        order_sum_ratio = torch.exp(new_order_logprobs.sum(dim=-2, keepdim=True) - batch.order_logprobs.sum(dim=-2, keepdim=True))
         order_ratio = torch.exp(new_order_logprobs - batch.order_logprobs)
         n_agent = new_action_logps.shape[-2]
-        order_log_sum = new_order_logprobs.sum(dim=-2, keepdims=True)
         adv = batch.advantages
         normalized_advantages = (adv - adv.mean()) / (adv.std() + 1e-8)
         normalized_advantages = normalized_advantages.mean(dim=-2, keepdim=True)
         ratio = torch.exp(new_action_logps - batch.action_logprobs)
-        action_sum_ratio = torch.exp(new_action_logps.sum(dim=-2, keepdim=True) - batch.action_logprobs.sum(dim=-2, keepdim=True))
-        hosei_advangages = gen_clipvalue(n_agent, alpha=2, device=normalized_advantages.device, step=-1) * normalized_advantages
+        hosei_advangages = gen_clipvalue(n_agent, alpha=0, device=normalized_advantages.device, step=-1) * normalized_advantages
         clips = gen_clipvalue(n_agent, 0, normalized_advantages.device, step=1) * 0.05
         if temp == "no":
             surr1 = torch.clamp(ratio, 1.0 - self.clip, 1.0 + self.clip) * normalized_advantages
             surr2 = ratio * normalized_advantages
-            order_surr1 = torch.clamp(order_ratio, 1.0 - clips, 1.0 + clips) * hosei_advangages
-            order_surr2 = order_ratio * hosei_advangages 
-        elif temp == "half":
-            surr1 = torch.clamp(ratio, 1.0 - self.clip, 1.0 + self.clip) * normalized_advantages * order_sum_ratio.detach().clone()
-            surr2 = ratio * normalized_advantages * order_sum_ratio.detach().clone()
-            order_surr1 = torch.clamp(order_ratio, 1.0 - clips, 1.0 + clips) * hosei_advangages
-            order_surr2 = order_ratio * hosei_advangages 
-        elif temp == "both":
-            surr1 = torch.clamp(ratio, 1.0 - self.clip, 1.0 + self.clip) * normalized_advantages * order_sum_ratio.detach().clone()
-            surr2 = ratio * normalized_advantages * order_sum_ratio.detach().clone()
-            order_surr1 = torch.clamp(order_ratio, 1.0 - clips, 1.0 + clips) * hosei_advangages * action_sum_ratio.detach().clone()
-            order_surr2 = order_ratio * hosei_advangages * action_sum_ratio.detach().clone()
+            order_loss = - (hosei_advangages * new_order_logprobs).mean()
+        elif temp == "joint":
+            ratio = ratio * order_ratio
+            surr1 = torch.clamp(ratio, 1.0 - self.clip, 1.0 + self.clip) * normalized_advantages
+            surr2 = ratio * normalized_advantages
+            order_loss = 0
         else:
             raise ValueError("temp value is invalid")
-        order_loss = -torch.min(order_surr1, order_surr2).mean()
         _use_policy_active_masks = True
         ordered_active_masks = torch.gather(
             batch.active_masks,
@@ -371,6 +361,21 @@ class MultiAgentTransformer(nn.Module):
             clip_frac,
             explained_var,
         )
+    
+    def calc_orderprob(self, prob: torch.Tensor, index: torch.Tensor):
+        batch_size, n_agent, _ = prob.shape
+        output_prob = torch.zeros((batch_size, n_agent, n_agent)).to(prob.device)
+        comp_prob = 1 - prob
+        accum_comp_prob = torch.ones((batch_size, n_agent + 1, n_agent)).to(prob.device)
+        for i in range(n_agent):
+            accum_comp_prob[:, i+1, :] = accum_comp_prob[:, i, :].clone() * comp_prob[:, i, :]
+            #accum_com_prob[i] & prob[i]
+        
+        output_prob = accum_comp_prob[: :-1, :] * prob
+        return output_prob
+
+            
+
 
     def load_model(self, path: str) -> None:
         """
