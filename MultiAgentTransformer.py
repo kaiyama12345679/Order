@@ -67,7 +67,8 @@ class MultiAgentTransformer(nn.Module):
         self.decoder = Decoder(n_dim, n_head, n_agent, action_dim, num_layer_decoder, discrete, use_action_id=True).to(device)
         self.pointer = Transformer_Pointer(n_dim, 1).to(device)
 
-        self.optimizer = optim.Adam(self.parameters(), lr=lr, eps=eps)
+        self.optimizer = optim.Adam(list(self.encoder.parameters()) + list(self.decoder.parameters()), lr=lr, eps=eps)
+        self.optimizer_order = optim.Adam(self.pointer.parameters(), lr=lr, eps=eps)
         self.gamma = gamma
         self.clip = clip
         self.entropy_coef = entropy_coef
@@ -235,7 +236,7 @@ class MultiAgentTransformer(nn.Module):
         state_seq = torch.cat([state_seq, id_vector], dim=-1)
         return state_seq
 
-    def update(self, batch: Transition):
+    def update(self, batch: Transition, beta=0):
         self.train()
         # temp = random.randint(0, 1)
         temp = "no"
@@ -290,19 +291,8 @@ class MultiAgentTransformer(nn.Module):
         normalized_advantages = (adv - adv.mean()) / (adv.std() + 1e-8)
         normalized_advantages = normalized_advantages.mean(dim=-2, keepdim=True)
         ratio = torch.exp(new_action_logps - batch.action_logprobs)
-        hosei_advangages = gen_clipvalue(n_agent, alpha=0, device=normalized_advantages.device, step=-1) * normalized_advantages
-        clips = gen_clipvalue(n_agent, 0, normalized_advantages.device, step=1) * 0.05
-        if temp == "no":
-            surr1 = torch.clamp(ratio, 1.0 - self.clip, 1.0 + self.clip) * normalized_advantages
-            surr2 = ratio * normalized_advantages
-            order_loss = - (hosei_advangages * new_order_logprobs).mean()
-        elif temp == "joint":
-            ratio = ratio * order_ratio
-            surr1 = torch.clamp(ratio, 1.0 - self.clip, 1.0 + self.clip) * normalized_advantages
-            surr2 = ratio * normalized_advantages
-            order_loss = 0
-        else:
-            raise ValueError("temp value is invalid")
+        surr1 = torch.clamp(ratio, 1.0 - self.clip, 1.0 + self.clip) * normalized_advantages
+        surr2 = ratio * normalized_advantages
         _use_policy_active_masks = True
         ordered_active_masks = torch.gather(
             batch.active_masks,
@@ -326,13 +316,26 @@ class MultiAgentTransformer(nn.Module):
 
         # Total loss
         self.optimizer.zero_grad()
-        loss = critic_loss + actor_loss + (order_loss / 5)
+        loss = critic_loss + actor_loss
         loss.backward()
         grad_norm = nn.utils.clip_grad_norm_(
-            self.parameters(), max_norm=self.max_grad_norm
+            list(self.encoder.parameters()) + list(self.decoder.parameters()), max_norm=self.max_grad_norm
         )
         self.optimizer.step()
 
+        # Order Optimize
+        _, new_action_logps, entropy, _, new_order_logprobs, order_entropy, new_values = self.get_action_and_value(
+            batch.obs, action_mask=batch.action_masks, action_seq=batch.actions, order_seq=batch.orders
+        )
+
+        hosei_advantages = gen_clipvalue(n_agent, alpha=2, device=normalized_advantages.device, step=-1) * normalized_advantages
+        order_loss = -(new_order_logprobs * hosei_advantages).mean() - self.entropy_coef * order_entropy.mean()
+        self.optimizer_order.zero_grad()
+        order_loss.backward()
+        grad_order_norm = nn.utils.clip_grad_norm(
+            self.pointer.parameters(), max_norm=self.max_grad_norm
+        )
+        self.optimizer_order.step()
 
         # Additional info for debugging
         # KL
