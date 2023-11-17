@@ -59,7 +59,7 @@ class MultiAgentTransformer(nn.Module):
         self.num_layer_decoder = num_layer_decoder
         self.device = device
         self.encoder = Encoder(n_dim, n_head, obs_dim, num_layer_encoder).to(device)
-        self.decoder = Decoder(n_dim, n_head, n_agent, action_dim, num_layer_decoder, discrete, use_action_id=True).to(device)
+        self.decoder = Decoder(n_dim, n_head, n_agent, action_dim, num_layer_decoder, discrete).to(device)
 
         self.optimizer = optim.Adam(self.parameters(), lr=lr, eps=eps)
         self.gamma = gamma
@@ -117,13 +117,14 @@ class MultiAgentTransformer(nn.Module):
         hidden_state, values = self.encoder(state_seq)
 
         ordered_state = None
-        ordered_enc_state = None
+        ordered_action_mask = action_mask
         order = None
         if order_seq is None:
-                   
+            action_vector = None
             for i in range(n_agent):
-                order_prob = self.pointer(hidden_state, ordered_state, index_seq=order)
+                action_logits, order_prob = self.decoder(action_vector, order, hidden_state, ordered_state, ordered_action_mask)
                 latest_prob = order_prob[:, -1, :]
+                prev_order = order
                 if deterministic:
                     a = latest_prob.argmax(dim=-1).unsqueeze(-1).to(torch.int64)
                 else:
@@ -138,36 +139,15 @@ class MultiAgentTransformer(nn.Module):
                     dim=-2,
                     index=order.unsqueeze(-1).expand(-1, -1, hidden_state.shape[-1]),
                 )
-        else:
-            if len(order_seq.shape) == 3:
-                order_seq = order_seq.squeeze(-1)
-            order_seq = order_seq.to(torch.int64)
-            ordered_state = torch.gather(
-                hidden_state,
-                dim=-2,
-                index=order_seq.unsqueeze(-1).expand(-1, -1, hidden_state.shape[-1]),
-            )
-            order_prob = self.pointer(hidden_state, ordered_state[:, :-1, :], index_seq=order_seq[:, :-1])
-            order = order_seq
-        
 
-        ordered_enc_state = ordered_state
+                ordered_action_mask = torch.gather(
+                    action_mask,
+                    dim=-2,
+                    index=order.unsqueeze(-1).expand(-1, -1, action_mask.shape[-1]),
+                )
 
-        order_probs = Categorical(order_prob)
-        order_logprobs = order_probs.log_prob(order).unsqueeze(-1)
-
-        action_mask = torch.gather(
-            action_mask,
-            dim=-2,
-            index=order.unsqueeze(-1).expand(-1, -1, action_mask.shape[-1]),
-        )
-
-        if action_seq is None:
-            # Recurrent action generation
-            action_vector = None
-            for i in range(self.n_agent):
-                action_logits = self.decoder(action_vector, order, ordered_enc_state, action_mask)
-                latest_action_logit = action_logits[:, i, :].unsqueeze(-2)
+                action_logits, order_prob = self.decoder(action_vector, prev_order, hidden_state, ordered_state, ordered_action_mask)
+                latest_action_logit = action_logits[:, -1, :].unsqueeze(-2)
                 if deterministic:
                     if self.discrete:
                         a = latest_action_logit.argmax(dim=-1).unsqueeze(-1).to(torch.int32)
@@ -188,14 +168,32 @@ class MultiAgentTransformer(nn.Module):
                 else:
                     action_vector = torch.cat([action_vector, a], dim=-2)
         else:
-            # Action is already provided
+            if len(order_seq.shape) == 3:
+                order_seq = order_seq.squeeze(-1)
+            order_seq = order_seq.to(torch.int64)
             action_vector = action_seq
             action_vector = torch.gather(
                 action_vector,
                 dim=-2,
-                index=order.unsqueeze(-1).expand(-1, -1, action_vector.shape[-1]),
+                index=order_seq.unsqueeze(-1).expand(-1, -1, action_vector.shape[-1]),
             )
-            action_logits = self.decoder(action_vector, order, ordered_enc_state, action_mask)
+            ordered_state = torch.gather(
+                hidden_state,
+                dim=-2,
+                index=order_seq.unsqueeze(-1).expand(-1, -1, hidden_state.shape[-1]),
+            )
+            ordered_action_mask = torch.gather(
+                    action_mask,
+                    dim=-2,
+                    index=order_seq.unsqueeze(-1).expand(-1, -1, action_mask.shape[-1]),
+                )
+            action_logits, order_prob = self.decoder(action_vector, order_seq, hidden_state, ordered_state, ordered_action_mask)
+            order = order_seq
+        
+
+        order_probs = Categorical(order_prob)
+        order_logprobs = order_probs.log_prob(order).unsqueeze(-1)
+
         if self.discrete:
             prob_dist = Categorical(logits=action_logits)
         else:
@@ -283,6 +281,15 @@ class MultiAgentTransformer(nn.Module):
         ratio = torch.exp(new_action_logps - batch.action_logprobs)
         surr1 = torch.clamp(ratio, 1.0 - self.clip, 1.0 + self.clip) * normalized_advantages
         surr2 = ratio * normalized_advantages
+
+        hosei_advantages = gen_clipvalue(n_agent, alpha=2, device=normalized_advantages.device, step=-1) * normalized_advantages
+        order_ratio = torch.exp(new_order_logprobs - batch.order_logprobs)
+        clips = gen_clipvalue(n_agent, alpha=0, device=normalized_advantages.device, step=1) * 0.2
+
+        order_surr1 = torch.clamp(order_ratio, 1.0 - clips, 1.0 + clips) * hosei_advantages
+        order_surr2 = order_ratio * hosei_advantages
+        order_loss = -torch.min(order_surr1, order_surr2).mean() - 0.05 * order_entropy.mean()
+
         _use_policy_active_masks = True
         ordered_active_masks = torch.gather(
             batch.active_masks,
@@ -306,36 +313,12 @@ class MultiAgentTransformer(nn.Module):
 
         # Total loss
         self.optimizer.zero_grad()
-        self.optimizer_order.zero_grad()
-        loss = critic_loss + actor_loss
+        loss = critic_loss + actor_loss + order_loss
         loss.backward()
         grad_norm = nn.utils.clip_grad_norm_(
-            list(self.encoder.parameters()) + list(self.decoder.parameters()), max_norm=self.max_grad_norm
+            self.parameters(), max_norm=self.max_grad_norm
         )
         self.optimizer.step()
-
-        # Order Optimize
-        _, new_action_logps, entropy, _, new_order_logprobs, order_entropy, new_values = self.get_action_and_value(
-            batch.obs, action_mask=batch.action_masks, action_seq=batch.actions, order_seq=batch.orders
-        )
-
-        hosei_advantages = gen_clipvalue(n_agent, alpha=2, device=normalized_advantages.device, step=-1) * normalized_advantages
-        order_ratio = torch.exp(new_order_logprobs - batch.order_logprobs)
-        clips = gen_clipvalue(n_agent, alpha=0, device=normalized_advantages.device, step=1) * 0.2
-        if temp == "REINFORCE":
-            order_loss = -(new_order_logprobs * hosei_advantages).mean() - 0.05 * order_entropy.mean()
-        else:
-            order_surr1 = torch.clamp(order_ratio, 1.0 - clips, 1.0 + clips) * hosei_advantages
-            order_surr2 = order_ratio * hosei_advantages
-            order_loss = -torch.min(order_surr1, order_surr2).mean() - 0.05 * order_entropy.mean()
-
-        self.optimizer_order.zero_grad()
-        self.optimizer.zero_grad()
-        order_loss.backward()
-        grad_order_norm = nn.utils.clip_grad_norm(
-            self.pointer.parameters(), max_norm=self.max_grad_norm
-        )
-        self.optimizer_order.step()
 
         # Additional info for debugging
         # KL
