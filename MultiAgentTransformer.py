@@ -239,7 +239,7 @@ class MultiAgentTransformer(nn.Module):
     def update(self, batch: Transition, beta=0):
         self.train()
         # temp = random.randint(0, 1)
-        temp = "no"
+        temp = "REINFORCE"
         # Model forward
         _, new_action_logps, entropy, _, new_order_logprobs, order_entropy, new_values = self.get_action_and_value(
             batch.obs, action_mask=batch.action_masks, action_seq=batch.actions, order_seq=batch.orders
@@ -316,6 +316,7 @@ class MultiAgentTransformer(nn.Module):
 
         # Total loss
         self.optimizer.zero_grad()
+        self.optimizer_order.zero_grad()
         loss = critic_loss + actor_loss
         loss.backward()
         grad_norm = nn.utils.clip_grad_norm_(
@@ -329,8 +330,17 @@ class MultiAgentTransformer(nn.Module):
         )
 
         hosei_advantages = gen_clipvalue(n_agent, alpha=2, device=normalized_advantages.device, step=-1) * normalized_advantages
-        order_loss = -(new_order_logprobs * hosei_advantages).mean() - self.entropy_coef * order_entropy.mean()
+        order_ratio = torch.exp(new_order_logprobs - batch.order_logprobs)
+        clips = gen_clipvalue(n_agent, alpha=0, device=normalized_advantages.device, step=1) * 0.2
+        if temp == "REINFORCE":
+            order_loss = -(new_order_logprobs * hosei_advantages).mean() - 0.05 * order_entropy.mean()
+        else:
+            order_surr1 = torch.clamp(order_ratio, 1.0 - clips, 1.0 + clips) * hosei_advantages
+            order_surr2 = order_ratio * hosei_advantages
+            order_loss = -torch.min(order_surr1, order_surr2).mean() - 0.05 * order_entropy.mean()
+
         self.optimizer_order.zero_grad()
+        self.optimizer.zero_grad()
         order_loss.backward()
         grad_order_norm = nn.utils.clip_grad_norm(
             self.pointer.parameters(), max_norm=self.max_grad_norm
