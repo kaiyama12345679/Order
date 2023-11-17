@@ -68,7 +68,7 @@ class Encoder(nn.Module):
 
 
 class EncoderBlock(nn.Module):
-    def __init__(self, n_dim, n_head):
+    def __init__(self, n_dim, n_head, is_causal=False):
         super().__init__()
         self.norm1 = nn.LayerNorm(n_dim)
         self.norm2 = nn.LayerNorm(n_dim)
@@ -81,55 +81,55 @@ class EncoderBlock(nn.Module):
             nn.GELU(),
             init_(nn.Linear(n_dim, n_dim)),
         )
+        self.is_causal = is_causal
 
     def forward(self, x):
-        attn_output, _ = self.mha(x, x, x)
+        src_len = x.shape[-2]
+        if self.is_causal:
+            ones = torch.ones(src_len, src_len).to(x.device)
+            self_mask = torch.triu(ones, diagonal=1).bool()
+            attn_output, _ = self.mha(x, x, x, attn_mask=self_mask)
+        else:
+            attn_output, _ = self.mha(x, x, x)
         x = self.norm1(x + attn_output)
         x = self.norm2(x + self.mlp(x))
         return x
 
 
 class Decoder(nn.Module):
-    def __init__(self, n_dim, n_head, n_agent, action_dim, num_decoder_layer, discrete=True, use_action_id=False) -> None:
+    def __init__(self, n_dim, n_head, n_agent, action_dim, num_decoder_layer, discrete=True) -> None:
         super().__init__()
 
         self.n_dim = n_dim
         self.n_head = n_head
         self.action_dim = action_dim
         self.num_decoder_layer = num_decoder_layer
-        self.use_action_id = use_action_id
+        self.discrete = discrete
 
         # self.decode_embed = nn.Embedding(action_dim + 1, n_dim)   # Equivalent except for init and GELU?
-        if discrete:
-            if self.use_action_id:
-                self.decode_embed = nn.Sequential(
-                    init_(nn.Linear(action_dim + 1 + n_agent, n_dim, bias=False), activate=True),
-                    nn.GELU(),
-                )
-            else:
-                self.decode_embed = nn.Sequential(
-                    init_(nn.Linear(action_dim + 1, n_dim, bias=False), activate=True),
-                    nn.GELU(),
-                )
+        if self.discrete:
+            self.decode_embed = nn.Sequential(
+                        init_(nn.Linear(action_dim + 1, n_dim, bias=False), activate=True),
+                        nn.GELU(),
+                    )
+            self.bos = torch.full((1, 1, 1), action_dim)
         else:
-            if self.use_action_id:
-                self.decode_embed = nn.Sequential(
-                    init_(nn.Linear(action_dim + n_agent, n_dim, bias=False), activate=True),
-                    nn.GELU(),
-                )
-            else:
-                self.decode_embed = nn.Sequential(
-                    init_(nn.Linear(action_dim, n_dim, bias=False), activate=True),
-                    nn.GELU(),
-                )
+            self.decode_embed = nn.Sequential(
+                        init_(nn.Linear(action_dim, n_dim, bias=False), activate=True),
+                        nn.GELU(),
+                    )
+            self.bos = nn.Parameter((1, 1, action_dim))
+        
 
         self.ln = nn.LayerNorm(n_dim)
 
+        self.order_embedding = nn.Embedding(n_agent + 1, n_dim)
+
         self.decoder = nn.ModuleList(
-            [DecoderBlock(n_dim, n_head) for _ in range(num_decoder_layer)]
+            [EncoderBlock(n_dim, n_head, is_causal=True)]
         )
 
-        self.mlp_decoder = nn.Sequential(
+        self.mlp_decoder_action = nn.Sequential(
             init_(nn.Linear(n_dim, n_dim), activate=True),
             nn.GELU(),
             nn.LayerNorm(n_dim),
@@ -138,11 +138,6 @@ class Decoder(nn.Module):
 
         if not discrete:
             self.log_std = nn.Parameter(torch.ones(action_dim))
-            self.bos = nn.Parameter(torch.randn(1, 1, action_dim))
-        else:
-            self.bos = torch.full((1, 1, 1), action_dim)
-
-        self.discrete = discrete
 
     def forward(self, action_seq, hidden_state, action_mask=None):
         """
@@ -150,29 +145,32 @@ class Decoder(nn.Module):
         hidden_state: (batch_size, seq_len, n_dim)
         """
         batch_size, n_agent, n_dim = hidden_state.shape
-        order_one_hot = torch.eye(n_agent).unsqueeze(0).expand(batch_size, -1, -1).to(hidden_state.device)
-        if action_seq is not None:
-            action_seq = torch.concat([self.bos.expand(batch_size, -1, -1).to(hidden_state.device), action_seq], dim=-2)
-        else:
+        if action_seq is None:
             action_seq = self.bos.expand(batch_size, -1, -1).to(hidden_state.device)
-        
-        order_one_hot = order_one_hot[:, :action_seq.shape[-2], :]
-        action_seq = action_seq[:, :n_agent, :]
-
-        if self.discrete:
-            one_hot_action_seq = F.one_hot(action_seq.squeeze(-1).to(torch.int64), num_classes=self.action_dim + 1)
-            concat_seq = torch.concat([one_hot_action_seq, order_one_hot], dim=-1)
-            action_embed_seq = self.decode_embed(concat_seq.to(dtype=torch.float))
         else:
-            concat_seq = torch.concat([action_seq, order_one_hot], dim=-1)
-            action_embed_seq = self.decode_embed(concat_seq.to(dtype=torch.float))
+            action_seq = torch.cat([self.bos.expand(batch_size, -1, -1).to(hidden_state.device), action_seq], dim=-2)
+        action_seq = action_seq[:, :n_agent, :]
+        input_state = hidden_state[:, :action_seq.shape[-2], :]
+        input_state = input_state + self.order_embedding(torch.arange(1, input_state.shape[-2] + 1).unsqueeze(0).expand(batch_size, -1).to(input_state.device))
+        if self.discrete:
+            one_hot_action_seq = F.one_hot(action_seq.squeeze(-1).to(torch.int64), num_classes=self.action_dim + 1).to(action_seq.device)
+            action_embed_seq = self.decode_embed(one_hot_action_seq.to(dtype=torch.float))
+        else:
+            action_embed_seq = self.decode_embed(action_seq.to(dtype=torch.float))
+
         action_embed_seq = self.ln(action_embed_seq)
+        action_embed_seq = action_embed_seq + self.order_embedding(torch.arange(0, action_embed_seq.shape[-2]).unsqueeze(0).expand(batch_size, -1).to(action_embed_seq.device))
+
+        input_seq = torch.zeros((batch_size, 2 * action_seq.shape[-2], n_dim)).to(action_seq.device) 
+        input_seq[:, 0::2, :] = action_embed_seq.clone()
+        input_seq[:, 1::2, :] = input_state.clone()
 
         for decoder in self.decoder:
-            action_embed_seq = decoder(tgt=hidden_state, src=action_embed_seq)
-        action_logit = self.mlp_decoder(action_embed_seq)
+            output_seq = decoder(input_seq)
+        action_logit = output_seq[:, 1::2, :]
+        action_logit = self.mlp_decoder_action(action_logit)
         if action_mask is not None:
-            action_logit = action_logit + (1 - action_mask) * (-1e9)
+            action_logit = action_logit + (1 - action_mask[:, :input_state.shape[-2], :]) * (-1e9)
 
         return action_logit
 

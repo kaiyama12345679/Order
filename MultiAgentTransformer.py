@@ -29,7 +29,6 @@ class MultiAgentTransformer(nn.Module):
         huber_delta: float,
         device: torch.device,
         discrete = True,
-        use_agent_id = True
     ) -> None:
         """
         Initialize MultiAgentTransformer.
@@ -57,12 +56,8 @@ class MultiAgentTransformer(nn.Module):
         self.num_layer_encoder = num_layer_encoder
         self.num_layer_decoder = num_layer_decoder
         self.device = device
-        self.use_agent_id = use_agent_id
-        if self.use_agent_id:
-            self.encoder = Encoder(n_dim, n_head, obs_dim + n_agent, num_layer_encoder).to(device)
-        else:
-            self.encoder = Encoder(n_dim, n_head, obs_dim, num_layer_encoder).to(device)
-        self.decoder = Decoder(n_dim, n_head, n_agent, action_dim, num_layer_decoder, discrete, use_action_id=True).to(device)
+        self.encoder = Encoder(n_dim, n_head, obs_dim, num_layer_encoder).to(device)
+        self.decoder = Decoder(n_dim, n_head, n_agent, action_dim, num_layer_decoder, discrete).to(device)
 
         self.optimizer = optim.Adam(self.parameters(), lr=lr, eps=eps)
 
@@ -92,8 +87,6 @@ class MultiAgentTransformer(nn.Module):
         Returns:
             torch.Tensor: Value prediction for the state sequence.
         """
-        if self.use_agent_id:
-            state_seq = self._add_id_vector(state_seq)
         hidden_state, values = self.encoder(state_seq)
         return values
 
@@ -117,8 +110,6 @@ class MultiAgentTransformer(nn.Module):
             tuple: Action vector, action log probabilities, entropy, and value prediction for the state sequence.
         """
         n_env, _, _ = state_seq.shape
-        if self.use_agent_id:
-            state_seq = self._add_id_vector(state_seq)
         hidden_state, values = self.encoder(state_seq)
 
         if action_seq is None:
@@ -126,7 +117,7 @@ class MultiAgentTransformer(nn.Module):
             action_vector = None
             for i in range(self.n_agent):
                 action_logits = self.decoder(action_vector, hidden_state, action_mask)
-                latest_action_logit = action_logits[:, i, :].unsqueeze(-2)
+                latest_action_logit = action_logits[:, -1, :].unsqueeze(-2)
                 if deterministic:
                     if self.discrete:
                         a = latest_action_logit.argmax(dim=-1).unsqueeze(-1).to(torch.int32)
