@@ -118,7 +118,7 @@ class Decoder(nn.Module):
                         init_(nn.Linear(action_dim, n_dim, bias=False), activate=True),
                         nn.GELU(),
                     )
-            self.bos = nn.Parameter((1, 1, action_dim))
+            self.bos = nn.Parameter(torch.randn((1, 1, action_dim)))
         
 
         self.ln = nn.LayerNorm(n_dim)
