@@ -131,7 +131,14 @@ class Decoder(nn.Module):
             init_(nn.Linear(n_dim, action_dim)),
         )
 
-        self.mlp_order = Transformer_Pointer(n_dim, 1)
+        self.mlp_decoder_order = nn.Sequential(
+            init_(nn.Linear(n_dim, n_dim), activate=True),
+            nn.GELU(),
+            nn.LayerNorm(n_dim),
+            init_(nn.Linear(n_dim, n_dim)),
+        )
+
+        self.pointer = Transformer_Pointer(n_dim, n_head)
 
         if not discrete:
             self.log_std = nn.Parameter(torch.ones(action_dim))
@@ -177,7 +184,8 @@ class Decoder(nn.Module):
         action_logit = output_seq[:, 1::2, :] if input_state is not None else None
         order_logit = output_seq[:, 0::2, :]
         action_logit = self.mlp_decoder_action(action_logit) if action_logit is not None else None
-        order_prob = self.mlp_order(hidden_state, order_logit, order)
+        order_logit = self.mlp_decoder_order(order_logit)
+        order_prob = self.pointer(hidden_state, order_logit, order)
         if action_mask is not None:
             if action_logit is not None:
                 action_logit = action_logit + (1 - action_mask[:, :input_state.shape[-2], :]) * (-1e9)
@@ -282,10 +290,6 @@ class Transformer_Pointer(nn.Module):
 
         self.n_dim = n_dim
         self.n_head = n_head
-
-        # self.mha_self = nn.MultiheadAttention(
-        #     embed_dim=n_dim, num_heads=n_head, batch_first=True
-        # )
         self.mha_srctgt = nn.MultiheadAttention(
             embed_dim=n_dim, num_heads=n_head, batch_first=True
         )
@@ -293,8 +297,7 @@ class Transformer_Pointer(nn.Module):
         # init_mha_(self.mha_self)
         init_mha_(self.mha_srctgt)
 
-        # self.norm1 = nn.LayerNorm(n_dim)
-        # self.norm2 = nn.LayerNorm(n_dim)
+        self.norm = nn.LayerNorm(n_dim)
         self.Wq = nn.Linear(n_dim, n_dim)
         self.Wk = nn.Linear(n_dim, n_dim)
 
@@ -314,17 +317,9 @@ class Transformer_Pointer(nn.Module):
 
         v = ordered_seq
 
-        # pe = positional_encoding(v.shape[-2], n_dim, v.device)
-        # v = pe + v
-
-        # ones = torch.ones(v.shape[1], v.shape[1]).to(v.device)
-        # self_mask = torch.triu(ones, diagonal=1).bool()
-
-        # selfattn_output, _ = self.mha_self(v, v, v, attn_mask=self_mask)
-        # v = self.norm1(selfattn_output + v)
         prob_mask = prob_mask[:, :n_agent, :]
         srctgtattn_output, _ = self.mha_srctgt(v, state_seq, state_seq, attn_mask=prob_mask)
-        # v = self.norm2(srctgtattn_output + v)
+        v = self.norm(srctgtattn_output + v)
         v = srctgtattn_output
         q = self.Wq(v)
         k = self.Wk(state_seq)
