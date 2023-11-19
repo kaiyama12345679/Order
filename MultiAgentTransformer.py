@@ -284,7 +284,7 @@ class MultiAgentTransformer(nn.Module):
 
         hosei_advantages = gen_clipvalue(n_agent, alpha=0, device=normalized_advantages.device, step=-1) * normalized_advantages
         order_ratio = torch.exp(new_order_logprobs - batch.order_logprobs)
-        clips = gen_clipvalue(n_agent, alpha=0, device=normalized_advantages.device, step=1) * 0.2
+        clips = gen_clipvalue(n_agent, alpha=0, device=normalized_advantages.device, step=1) * 0.05
 
         order_surr1 = torch.clamp(order_ratio, 1.0 - clips, 1.0 + clips) * hosei_advantages
         order_surr2 = order_ratio * hosei_advantages
@@ -313,7 +313,7 @@ class MultiAgentTransformer(nn.Module):
 
         # Total loss
         self.optimizer.zero_grad()
-        loss = critic_loss + actor_loss + (order_loss) - 0.01 * order_entropy.mean()
+        loss = critic_loss + actor_loss + (order_loss) - 0.05 * order_entropy.mean()
         loss.backward()
         grad_norm = nn.utils.clip_grad_norm_(
             self.parameters(), max_norm=self.max_grad_norm
