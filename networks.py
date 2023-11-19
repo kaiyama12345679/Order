@@ -131,15 +131,6 @@ class Decoder(nn.Module):
             init_(nn.Linear(n_dim, action_dim)),
         )
 
-        self.mlp_decoder_order = nn.Sequential(
-            init_(nn.Linear(n_dim, n_dim), activate=True),
-            nn.GELU(),
-            nn.LayerNorm(n_dim),
-            init_(nn.Linear(n_dim, n_dim)),
-        )
-
-        self.pointer = Transformer_Pointer(n_dim, n_head)
-
         if not discrete:
             self.log_std = nn.Parameter(torch.ones(action_dim))
             self.bos = nn.Parameter(torch.randn(1, 1, action_dim))
@@ -182,14 +173,11 @@ class Decoder(nn.Module):
         for decoder in self.decoder:
             output_seq = decoder(input_seq)
         action_logit = output_seq[:, 1::2, :] if input_state is not None else None
-        order_logit = output_seq[:, 0::2, :]
         action_logit = self.mlp_decoder_action(action_logit) if action_logit is not None else None
-        order_logit = self.mlp_decoder_order(order_logit)
-        order_prob = self.pointer(hidden_state, order_logit, order)
         if action_mask is not None:
             if action_logit is not None:
                 action_logit = action_logit + (1 - action_mask[:, :input_state.shape[-2], :]) * (-1e9)
-        return action_logit, order_prob
+        return action_logit
 
 
 class DecoderBlock(nn.Module):
