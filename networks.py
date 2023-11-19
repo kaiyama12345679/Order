@@ -299,10 +299,9 @@ class Transformer_Pointer(nn.Module):
         # init_mha_(self.mha_self)
         init_mha_(self.mha_srctgt)
 
-        # self.norm1 = nn.LayerNorm(n_dim)
-        # self.norm2 = nn.LayerNorm(n_dim)
-        self.Wq = nn.Linear(n_dim, n_dim)
-        self.Wk = nn.Linear(n_dim, n_dim)
+        self.norm = nn.LayerNorm(n_dim)
+        self.Wq = init_(nn.Linear(n_dim, n_dim))
+        self.Wk = init_(nn.Linear(n_dim, n_dim))
 
     def forward(self, state_seq, ordered_seq=None, index_seq=None):
 
@@ -332,7 +331,7 @@ class Transformer_Pointer(nn.Module):
         # selfattn_output, _ = self.mha_self(v, v, v, attn_mask=self_mask)
         # v = self.norm1(selfattn_output + v)
         srctgtattn_output, _ = self.mha_srctgt(v, state_seq, state_seq, attn_mask=prob_mask)
-        # v = self.norm2(srctgtattn_output + v)
+        v = self.norm(srctgtattn_output + v)
         v = srctgtattn_output
         q = self.Wq(v)
         k = self.Wk(state_seq)
