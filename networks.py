@@ -286,8 +286,8 @@ class Transformer_Pointer(nn.Module):
         init_mha_(self.mha_srctgt)
 
         self.norm = nn.LayerNorm(n_dim)
-        self.Wq = nn.Linear(n_dim, n_dim)
-        self.Wk = nn.Linear(n_dim, n_dim)
+        self.Wq = init_(nn.Linear(n_dim, n_dim))
+        self.Wk = init_(nn.Linear(n_dim, n_dim))
 
     def forward(self, state_seq, ordered_seq=None, index_seq=None):
 
