@@ -58,7 +58,7 @@ class MultiAgentTransformer(nn.Module):
         self.num_layer_encoder = num_layer_encoder
         self.num_layer_decoder = num_layer_decoder
         self.device = device
-        self.encoder = Encoder(n_dim, n_head, obs_dim, num_layer_encoder).to(device)
+        self.encoder = Encoder(n_dim, n_head, obs_dim + n_agent, num_layer_encoder).to(device)
         self.decoder = Decoder(n_dim, n_head, n_agent, action_dim, num_layer_decoder, discrete).to(device)
 
         self.optimizer = optim.Adam(self.parameters(), lr=lr, eps=eps)
@@ -89,7 +89,7 @@ class MultiAgentTransformer(nn.Module):
         Returns:
             torch.Tensor: Value prediction for the state sequence.
         """
-
+        state_seq = self._add_id_vector(state_seq)
         hidden_state, values = self.encoder(state_seq)
         return values
 
@@ -114,6 +114,7 @@ class MultiAgentTransformer(nn.Module):
             tuple: Action vector, action log probabilities, entropy, and value prediction for the state sequence.
         """
         n_env, n_agent, _ = state_seq.shape
+        state_seq = self._add_id_vector(state_seq)
         hidden_state, values = self.encoder(state_seq)
 
         ordered_state = None
@@ -282,9 +283,9 @@ class MultiAgentTransformer(nn.Module):
         surr1 = torch.clamp(ratio, 1.0 - self.clip, 1.0 + self.clip) * normalized_advantages
         surr2 = ratio * normalized_advantages
 
-        hosei_advantages = gen_clipvalue(n_agent, alpha=0, device=normalized_advantages.device, step=-1) * normalized_advantages
+        hosei_advantages = gen_clipvalue(n_agent, alpha=2, device=normalized_advantages.device, step=-1) * normalized_advantages
         order_ratio = torch.exp(new_order_logprobs - batch.order_logprobs)
-        clips = gen_clipvalue(n_agent, alpha=0, device=normalized_advantages.device, step=1) * 0.05
+        clips = gen_clipvalue(n_agent, alpha=0, device=normalized_advantages.device, step=1) * 0.2
 
         order_surr1 = torch.clamp(order_ratio, 1.0 - clips, 1.0 + clips) * hosei_advantages
         order_surr2 = order_ratio * hosei_advantages
