@@ -62,6 +62,8 @@ class MultiAgentTransformer(nn.Module):
         self.decoder = Decoder(n_dim, n_head, n_agent, action_dim, num_layer_decoder, discrete).to(device)
 
         self.optimizer = optim.Adam(self.parameters(), lr=lr, eps=eps)
+        self.optimizer_order = optim.Adam(list(self.decoder.mlp_decoder_order.parameters()) + list(self.decoder.pointer.parameters()),
+                                          lr=lr, eps=eps)
         self.gamma = gamma
         self.clip = clip
         self.entropy_coef = entropy_coef
@@ -274,7 +276,6 @@ class MultiAgentTransformer(nn.Module):
             ).sum() / batch.active_masks.sum()
         else:
             critic_loss = critic_loss.mean()
-        order_ratio = torch.exp(new_order_logprobs - batch.order_logprobs)
         n_agent = new_action_logps.shape[-2]
         adv = batch.advantages
         normalized_advantages = (adv - adv.mean()) / (adv.std() + 1e-8)
@@ -282,14 +283,6 @@ class MultiAgentTransformer(nn.Module):
         ratio = torch.exp(new_action_logps - batch.action_logprobs)
         surr1 = torch.clamp(ratio, 1.0 - self.clip, 1.0 + self.clip) * normalized_advantages
         surr2 = ratio * normalized_advantages
-
-        hosei_advantages = gen_clipvalue(n_agent, alpha=2, device=normalized_advantages.device, step=-1) * normalized_advantages
-        order_ratio = torch.exp(new_order_logprobs - batch.order_logprobs)
-        clips = gen_clipvalue(n_agent, alpha=0, device=normalized_advantages.device, step=1) * 0.2
-
-        order_surr1 = torch.clamp(order_ratio, 1.0 - clips, 1.0 + clips) * hosei_advantages
-        order_surr2 = order_ratio * hosei_advantages
-        order_loss = -torch.min(order_surr1, order_surr2).mean()
 
         _use_policy_active_masks = True
         ordered_active_masks = torch.gather(
@@ -314,12 +307,30 @@ class MultiAgentTransformer(nn.Module):
 
         # Total loss
         self.optimizer.zero_grad()
-        loss = critic_loss + actor_loss + (order_loss) - 0.05 * order_entropy.mean()
+        self.optimizer_order.zero_grad()
+        loss = critic_loss + actor_loss
         loss.backward()
         grad_norm = nn.utils.clip_grad_norm_(
             self.parameters(), max_norm=self.max_grad_norm
         )
         self.optimizer.step()
+
+        _, new_action_logps, entropy, _, new_order_logprobs, order_entropy, new_values = self.get_action_and_value(
+            batch.obs, action_mask=batch.action_masks, action_seq=batch.actions, order_seq=batch.orders
+        )
+
+        hosei_advantages = gen_clipvalue(n_agent, alpha=2, device=normalized_advantages.device, step=-1) * normalized_advantages
+        order_ratio = torch.exp(new_order_logprobs - batch.order_logprobs)
+        clips = gen_clipvalue(n_agent, alpha=0, device=normalized_advantages.device, step=1) * 0.2
+
+        order_surr1 = torch.clamp(order_ratio, 1.0 - clips, 1.0 + clips) * hosei_advantages
+        order_surr2 = order_ratio * hosei_advantages
+        order_loss = -torch.min(order_surr1, order_surr2).mean() - 0.05 * order_entropy.mean()
+
+        self.optimizer.zero_grad()
+        self.optimizer_order.zero_grad()
+        order_loss.backward()
+        self.optimizer_order.step()
 
         # Additional info for debugging
         # KL
