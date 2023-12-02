@@ -60,10 +60,10 @@ class MultiAgentTransformer(nn.Module):
         self.device = device
         self.encoder = Encoder(n_dim, n_head, obs_dim + n_agent, num_layer_encoder).to(device)
         self.decoder = Decoder(n_dim, n_head, n_agent, action_dim, num_layer_decoder, discrete).to(device)
-
-        self.optimizer = optim.Adam(self.parameters(), lr=lr, eps=eps)
-        self.optimizer_order = optim.Adam(list(self.decoder.mlp_decoder_order.parameters()) + list(self.decoder.pointer.parameters()),
-                                          lr=lr, eps=eps)
+        self.pointer = Transformer_Pointer(n_dim, n_head).to(device)
+        self.optimizer = optim.Adam(list(self.encoder.parameters()) + list(self.decoder.parameters()), lr=lr, eps=eps)
+        self.order_optimizer = optim.Adam(self.pointer.parameters(), lr=lr, eps=eps)
+        
         self.gamma = gamma
         self.clip = clip
         self.entropy_coef = entropy_coef
