@@ -328,8 +328,11 @@ class MultiAgentTransformer(nn.Module):
         _, new_action_logps, entropy, _, new_order_logprobs, order_entropy, new_values = self.get_action_and_value(
             batch.obs, action_mask=batch.action_masks, action_seq=batch.actions, order_seq=batch.orders
         )
-
-        hosei_advantages = gen_clipvalue(n_agent, alpha=2, device=normalized_advantages.device, step=-1) * normalized_advantages
+        action_sum_ratio = torch.exp(new_action_logps.sum(dim=-2, keepdim=True) - batch.action_logprobs.sum(dim=-2, keepdim=True)).detach().clone()
+        adv = batch.advantages * action_sum_ratio
+        normalized_advantages = (adv - adv.mean()) / (adv.std() + 1e-8)
+        normalized_advantages = normalized_advantages.mean(dim=-2, keepdim=True)
+        hosei_advantages = gen_clipvalue(n_agent, alpha=0, device=normalized_advantages.device, step=-1) * normalized_advantages
         order_ratio = torch.exp(new_order_logprobs - batch.order_logprobs)
         clips = gen_clipvalue(n_agent, alpha=0, device=normalized_advantages.device, step=1) * 0.2
         if temp == "REINFORCE":
