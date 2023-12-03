@@ -161,10 +161,16 @@ class Decoder(nn.Module):
 
         if self.discrete:
             one_hot_action_seq = F.one_hot(action_seq.squeeze(-1).to(torch.int64), num_classes=self.action_dim + 1)
-            concat_seq = torch.concat([one_hot_action_seq, order_one_hot], dim=-1)
+            if self.use_action_id:
+                concat_seq = torch.concat([one_hot_action_seq, order_one_hot], dim=-1)
+            else:
+                concat_seq = one_hot_action_seq
             action_embed_seq = self.decode_embed(concat_seq.to(dtype=torch.float))
         else:
-            concat_seq = torch.concat([action_seq, order_one_hot], dim=-1)
+            if self.use_action_id:
+                concat_seq = torch.concat([action_seq, order_one_hot], dim=-1)
+            else:
+                concat_seq = action_seq
             action_embed_seq = self.decode_embed(concat_seq.to(dtype=torch.float))
         action_embed_seq = self.ln(action_embed_seq)
 
