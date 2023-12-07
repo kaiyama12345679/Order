@@ -125,7 +125,8 @@ class MultiAgentTransformer(nn.Module):
         if order_seq is None:
             action_vector = None
             for i in range(n_agent):
-                action_logits, order_prob = self.decoder(action_vector, order, hidden_state, ordered_state, ordered_action_mask)
+                action_logits, order_logit = self.decoder(action_vector, order, hidden_state, ordered_state, ordered_action_mask)
+                order_prob = self.pointer(hidden_state, order_logit, order)
                 latest_prob = order_prob[:, -1, :]
                 prev_order = order
                 if deterministic:
@@ -190,7 +191,8 @@ class MultiAgentTransformer(nn.Module):
                     dim=-2,
                     index=order_seq.unsqueeze(-1).expand(-1, -1, action_mask.shape[-1]),
                 )
-            action_logits, order_prob = self.decoder(action_vector, order_seq, hidden_state, ordered_state, ordered_action_mask)
+            action_logits, order_logit = self.decoder(action_vector, order_seq, hidden_state, ordered_state, ordered_action_mask)
+            order_prob = self.pointer(hidden_state, order_logit, order)
             order = order_seq
         
 
@@ -319,7 +321,7 @@ class MultiAgentTransformer(nn.Module):
             batch.obs, action_mask=batch.action_masks, action_seq=batch.actions, order_seq=batch.orders
         )
 
-        hosei_advantages = gen_clipvalue(n_agent, alpha=2, device=normalized_advantages.device, step=-1) * normalized_advantages
+        hosei_advantages = gen_clipvalue(n_agent, alpha=0, device=normalized_advantages.device, step=-1) * normalized_advantages
         order_ratio = torch.exp(new_order_logprobs - batch.order_logprobs)
         clips = gen_clipvalue(n_agent, alpha=0, device=normalized_advantages.device, step=1) * 0.2
 
@@ -328,9 +330,9 @@ class MultiAgentTransformer(nn.Module):
         order_loss = -torch.min(order_surr1, order_surr2).mean() - 0.05 * order_entropy.mean()
 
         self.optimizer.zero_grad()
-        self.optimizer_order.zero_grad()
+        self.order_optimizer.zero_grad()
         order_loss.backward()
-        self.optimizer_order.step()
+        self.order_optimizer.step()
 
         # Additional info for debugging
         # KL

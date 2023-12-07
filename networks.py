@@ -173,11 +173,12 @@ class Decoder(nn.Module):
         for decoder in self.decoder:
             output_seq = decoder(input_seq)
         action_logit = output_seq[:, 1::2, :] if input_state is not None else None
+        order_logit = output_seq[:, 0::2, :]
         action_logit = self.mlp_decoder_action(action_logit) if action_logit is not None else None
         if action_mask is not None:
             if action_logit is not None:
                 action_logit = action_logit + (1 - action_mask[:, :input_state.shape[-2], :]) * (-1e9)
-        return action_logit
+        return action_logit, order_logit
 
 
 
@@ -289,6 +290,11 @@ class Transformer_Pointer(nn.Module):
         self.norm = nn.LayerNorm(n_dim)
         self.Wq = init_(nn.Linear(n_dim, n_dim))
         self.Wk = init_(nn.Linear(n_dim, n_dim))
+        self.order_mlp = nn.Sequential(
+            init_(nn.Linear(n_dim, n_dim), activate=True),
+            nn.GELU(),
+            init_(nn.Linear(n_dim, n_dim)),
+        )
 
     def forward(self, state_seq, ordered_seq=None, index_seq=None):
 
@@ -304,7 +310,8 @@ class Transformer_Pointer(nn.Module):
                 prob_mask = torch.cat([prob_mask, latest_mask.unsqueeze(1)], dim=-2)
         prob_mask = prob_mask.bool()
 
-        v = ordered_seq
+        v = ordered_seq[:, :n_agent, :]
+        v = self.order_mlp(v)
 
         prob_mask = prob_mask[:, :n_agent, :]
         srctgtattn_output, _ = self.mha_srctgt(v, state_seq, state_seq, attn_mask=prob_mask)
