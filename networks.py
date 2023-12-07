@@ -96,7 +96,7 @@ class EncoderBlock(nn.Module):
 
 
 class Decoder(nn.Module):
-    def __init__(self, n_dim, n_head, n_agent, action_dim, num_decoder_layer, discrete=True, use_action_id=False) -> None:
+    def __init__(self, state_dim, n_dim, n_head, n_agent, action_dim, num_decoder_layer, discrete=True, use_action_id=False) -> None:
         super().__init__()
 
         self.n_dim = n_dim
@@ -104,6 +104,12 @@ class Decoder(nn.Module):
         self.action_dim = action_dim
         self.num_decoder_layer = num_decoder_layer
         self.use_action_id = use_action_id
+
+        self.state_embed = nn.Sequential(
+            init_(nn.Linear(state_dim + n_agent, n_dim), activate=True),
+            nn.GELU(),
+            init_(nn.Linear(n_dim, n_dim)),
+        )
 
         # self.decode_embed = nn.Embedding(action_dim + 1, n_dim)   # Equivalent except for init and GELU?
         if discrete:

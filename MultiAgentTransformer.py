@@ -59,7 +59,7 @@ class MultiAgentTransformer(nn.Module):
         self.device = device
 
         self.encoder = Encoder(n_dim, n_head, obs_dim + n_agent, num_layer_encoder).to(device)
-        self.decoder = Decoder(n_dim, n_head, n_agent, action_dim, num_layer_decoder, discrete, use_action_id=True).to(device)
+        self.decoder = Decoder(obs_dim, n_dim, n_head, n_agent, action_dim, num_layer_decoder, discrete, use_action_id=True).to(device)
 
         self.optimizer = optim.Adam(self.parameters(), lr=lr, eps=eps)
         self.gamma = gamma
@@ -147,11 +147,17 @@ class MultiAgentTransformer(nn.Module):
             index=order.unsqueeze(-1).expand(-1, -1, action_mask.shape[-1]),
         )
 
+        ordered_state = torch.gather(
+            state_seq,
+            dim=-2,
+            index=order.unsqueeze(-1).expand(-1, -1, state_seq.shape[-1]),
+        )
+
         if action_seq is None:
             # Recurrent action generation
             action_vector = None
             for i in range(self.n_agent):
-                action_logits = self.decoder(action_vector, order, ordered_enc_state, action_mask)
+                action_logits = self.decoder(action_vector, order, ordered_state, action_mask)
                 latest_action_logit = action_logits[:, i, :].unsqueeze(-2)
                 if deterministic:
                     if self.discrete:
@@ -180,7 +186,7 @@ class MultiAgentTransformer(nn.Module):
                 dim=-2,
                 index=order.unsqueeze(-1).expand(-1, -1, action_vector.shape[-1]),
             )
-            action_logits = self.decoder(action_vector, order, ordered_enc_state, action_mask)
+            action_logits = self.decoder(action_vector, order, ordered_state, action_mask)
         if self.discrete:
             prob_dist = Categorical(logits=action_logits)
         else:
