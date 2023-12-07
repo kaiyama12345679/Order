@@ -150,7 +150,7 @@ class MultiAgentTransformer(nn.Module):
                     index=order.unsqueeze(-1).expand(-1, -1, action_mask.shape[-1]),
                 )
 
-                action_logits, order_prob = self.decoder(action_vector, prev_order, hidden_state, ordered_state, ordered_action_mask)
+                action_logits, order_logit = self.decoder(action_vector, prev_order, hidden_state, ordered_state, ordered_action_mask)
                 latest_action_logit = action_logits[:, -1, :].unsqueeze(-2)
                 if deterministic:
                     if self.discrete:
@@ -192,7 +192,7 @@ class MultiAgentTransformer(nn.Module):
                     index=order_seq.unsqueeze(-1).expand(-1, -1, action_mask.shape[-1]),
                 )
             action_logits, order_logit = self.decoder(action_vector, order_seq, hidden_state, ordered_state, ordered_action_mask)
-            order_prob = self.pointer(hidden_state, order_logit, order)
+            order_prob = self.pointer(hidden_state, order_logit, order_seq)
             order = order_seq
         
 
@@ -309,7 +309,7 @@ class MultiAgentTransformer(nn.Module):
 
         # Total loss
         self.optimizer.zero_grad()
-        self.optimizer_order.zero_grad()
+        self.order_optimizer.zero_grad()
         loss = critic_loss + actor_loss
         loss.backward()
         grad_norm = nn.utils.clip_grad_norm_(
