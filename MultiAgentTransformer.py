@@ -232,7 +232,7 @@ class MultiAgentTransformer(nn.Module):
     def update(self, batch: Transition, beta=0):
         self.train()
         # temp = random.randint(0, 1)
-        temp = "REINFORCE"
+        temp = "ppo"
         # Model forward
         _, new_action_logps, entropy, _, new_order_logprobs, order_entropy, new_values = self.get_action_and_value(
             batch.obs, action_mask=batch.action_masks, action_seq=batch.actions, order_seq=batch.orders
