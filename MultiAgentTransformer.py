@@ -329,7 +329,7 @@ class MultiAgentTransformer(nn.Module):
             batch.obs, action_mask=batch.action_masks, action_seq=batch.actions, order_seq=batch.orders
         )
         action_sum_ratio = torch.exp(new_action_logps.sum(dim=-2, keepdim=True) - batch.action_logprobs.sum(dim=-2, keepdim=True)).detach().clone()
-        adv = batch.advantages * action_sum_ratio
+        adv = batch.advantages
         normalized_advantages = (adv - adv.mean()) / (adv.std() + 1e-8)
         normalized_advantages = normalized_advantages.mean(dim=-2, keepdim=True)
         hosei_advantages = gen_clipvalue(n_agent, alpha=0, device=normalized_advantages.device, step=-1) * normalized_advantages
