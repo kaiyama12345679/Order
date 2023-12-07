@@ -83,7 +83,7 @@ class MultiAgentTransformer(nn.Module):
 
         # Normal axes should be 2
         self.value_normalizer = ValueNorm(
-            input_shape=1, norm_axes=2, device=self.device
+            input_shape=1, device=self.device
         )
 
     def get_value(self, state_seq: torch.Tensor) -> torch.Tensor:
@@ -245,14 +245,17 @@ class MultiAgentTransformer(nn.Module):
             batch.obs, action_mask=batch.action_masks, action_seq=batch.actions, order_seq=batch.orders
         )
 
+        new_values = new_values.view(-1, 1)
+        batch_values = batch.values.view(-1, 1)
+        batch_returns = batch.returns.view(-1, 1)
         # update critic
-        value_clipped = batch.values + (new_values - batch.values).clamp(
+        value_clipped = batch_values + (new_values - batch_values).clamp(
             -self.clip, self.clip
         )
 
         if self.value_normalizer:
-            self.value_normalizer.update(batch.returns)
-            normalize_return = self.value_normalizer.normalize(batch.returns)
+            self.value_normalizer.update(batch_returns)
+            normalize_return = self.value_normalizer.normalize(batch_returns)
             critic_loss_clipped = F.huber_loss(
                 normalize_return,
                 value_clipped,
@@ -264,13 +267,13 @@ class MultiAgentTransformer(nn.Module):
             )
         else:
             critic_loss_clipped = F.huber_loss(
-                batch.returns,
+                batch_returns,
                 value_clipped,
                 reduction="none",
                 delta=self.huber_delta,
             )
             critic_loss_original = F.huber_loss(
-                batch.returns, new_values, reduction="none", delta=self.huber_delta
+                batch_returns, new_values, reduction="none", delta=self.huber_delta
             )
         _use_clipped_value_loss = True
         if _use_clipped_value_loss:
@@ -281,7 +284,7 @@ class MultiAgentTransformer(nn.Module):
         _use_value_active_masks = True
         if _use_value_active_masks:
             critic_loss = (
-                critic_loss * batch.active_masks
+                critic_loss * batch.active_masks.view(-1, 1)
             ).sum() / batch.active_masks.sum()
         else:
             critic_loss = critic_loss.mean()
@@ -357,9 +360,9 @@ class MultiAgentTransformer(nn.Module):
             clip_frac = ((ratio - 1.0).abs() > self.clip).float().mean().item()
             # explained_variance
             if self.value_normalizer:
-                denormalized_values = self.value_normalizer.denormalize(batch.values)
+                denormalized_values = self.value_normalizer.denormalize(batch_values)
                 y_pred = denormalized_values.cpu().numpy()
-                y_true = batch.returns.cpu().numpy()
+                y_true = batch_returns.cpu().numpy()
                 var_y = np.var(y_true)
                 explained_var = (
                     np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
