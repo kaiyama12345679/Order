@@ -31,7 +31,7 @@ class MultiAgentTransformer(nn.Module):
         huber_delta: float,
         device: torch.device,
         discrete = True,
-        use_agent_id = True
+        use_agent_id = False
     ) -> None:
         """
         Initialize MultiAgentTransformer.
@@ -67,8 +67,7 @@ class MultiAgentTransformer(nn.Module):
         self.decoder = Decoder(n_dim, n_head, n_agent, action_dim, num_layer_decoder, discrete, use_action_id=False).to(device)
         self.pointer = Transformer_Pointer(n_dim, 1).to(device)
 
-        self.optimizer = optim.Adam(list(self.encoder.parameters()) + list(self.decoder.parameters()), lr=lr, eps=eps)
-        self.optimizer_order = optim.Adam(self.pointer.parameters(), lr=lr, eps=eps)
+        self.optimizer = optim.Adam(self.parameters(), lr=lr, eps=eps)
         self.gamma = gamma
         self.clip = clip
         self.entropy_coef = entropy_coef
@@ -293,7 +292,8 @@ class MultiAgentTransformer(nn.Module):
         adv = batch.advantages
         normalized_advantages = (adv - adv.mean()) / (adv.std() + 1e-8)
         normalized_advantages = normalized_advantages.mean(dim=-2, keepdim=True)
-        ratio = torch.exp(new_action_logps - batch.action_logprobs)
+        action_ratio = torch.exp(new_action_logps - batch.action_logprobs)
+        ratio = action_ratio * order_ratio
         surr1 = torch.clamp(ratio, 1.0 - self.clip, 1.0 + self.clip) * normalized_advantages
         surr2 = ratio * normalized_advantages
         _use_policy_active_masks = True
@@ -315,43 +315,16 @@ class MultiAgentTransformer(nn.Module):
         entropy_only_active = (
             entropy * ordered_active_masks
         ).sum() / ordered_active_masks.sum()
-        actor_loss = policy_loss - self.entropy_coef * entropy_only_active
+        actor_loss = policy_loss - self.entropy_coef * entropy_only_active - 0.01 * order_entropy.mean()
 
         # Total loss
         self.optimizer.zero_grad()
-        self.optimizer_order.zero_grad()
         loss = critic_loss + actor_loss
         loss.backward()
         grad_norm = nn.utils.clip_grad_norm_(
-            list(self.encoder.parameters()) + list(self.decoder.parameters()), max_norm=self.max_grad_norm
+            self.parameters(), max_norm=self.max_grad_norm
         )
         self.optimizer.step()
-
-        # Order Optimize
-        _, new_action_logps, entropy, _, new_order_logprobs, order_entropy, new_values = self.get_action_and_value(
-            batch.obs, action_mask=batch.action_masks, action_seq=batch.actions, order_seq=batch.orders
-        )
-        action_sum_ratio = torch.exp(new_action_logps.sum(dim=-2, keepdim=True) - batch.action_logprobs.sum(dim=-2, keepdim=True)).detach().clone()
-        adv = batch.advantages
-        normalized_advantages = (adv - adv.mean()) / (adv.std() + 1e-8)
-        normalized_advantages = normalized_advantages.mean(dim=-2, keepdim=True)
-        hosei_advantages = gen_clipvalue(n_agent, alpha=0, device=normalized_advantages.device, step=-1) * normalized_advantages
-        order_ratio = torch.exp(new_order_logprobs - batch.order_logprobs)
-        clips = gen_clipvalue(n_agent, alpha=0, device=normalized_advantages.device, step=1) * 0.2
-        if temp == "REINFORCE":
-            order_loss = -(new_order_logprobs * hosei_advantages).mean() - 0.05 * order_entropy.mean()
-        else:
-            order_surr1 = torch.clamp(order_ratio, 1.0 - clips, 1.0 + clips) * hosei_advantages
-            order_surr2 = order_ratio * hosei_advantages
-            order_loss = -torch.min(order_surr1, order_surr2).mean() - 0.05 * order_entropy.mean()
-
-        self.optimizer_order.zero_grad()
-        self.optimizer.zero_grad()
-        order_loss.backward()
-        grad_order_norm = nn.utils.clip_grad_norm(
-            self.pointer.parameters(), max_norm=self.max_grad_norm
-        )
-        self.optimizer_order.step()
 
         # Additional info for debugging
         # KL
