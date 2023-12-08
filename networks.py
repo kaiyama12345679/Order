@@ -173,12 +173,11 @@ class Decoder(nn.Module):
         for decoder in self.decoder:
             output_seq = decoder(input_seq)
         action_logit = output_seq[:, 1::2, :] if input_state is not None else None
-        order_logit = output_seq[:, 0::2, :]
         action_logit = self.mlp_decoder_action(action_logit) if action_logit is not None else None
         if action_mask is not None:
             if action_logit is not None:
                 action_logit = action_logit + (1 - action_mask[:, :input_state.shape[-2], :]) * (-1e9)
-        return action_logit, order_logit
+        return action_logit
 
 
 
@@ -290,17 +289,17 @@ class Transformer_Pointer(nn.Module):
         self.norm = nn.LayerNorm(n_dim)
         self.Wq = init_(nn.Linear(n_dim, n_dim))
         self.Wk = init_(nn.Linear(n_dim, n_dim))
-        self.order_mlp = nn.Sequential(
-            init_(nn.Linear(n_dim, n_dim), activate=True),
-            nn.GELU(),
-            init_(nn.Linear(n_dim, n_dim)),
-        )
+        self.bos = nn.Parameter(torch.randn(1, 1, n_dim))
 
     def forward(self, state_seq, ordered_seq=None, index_seq=None):
 
         batch_size, n_agent, n_dim = state_seq.shape
         length = index_seq.shape[-1] if (index_seq is not None) else 0
 
+        if ordered_seq is None:
+            ordered_seq = self.bos.expand(batch_size, -1, -1).to(state_seq.device)
+        else:
+            ordered_seq = torch.cat([self.bos.expand(batch_size, -1, -1).to(state_seq.device), ordered_seq], dim=-2)
         prob_mask = torch.zeros((batch_size, 1, n_agent), device=state_seq.device)
         if index_seq is not None:
             for i in range(index_seq.shape[1]):
@@ -311,7 +310,6 @@ class Transformer_Pointer(nn.Module):
         prob_mask = prob_mask.bool()
 
         v = ordered_seq[:, :n_agent, :]
-        v = self.order_mlp(v)
 
         prob_mask = prob_mask[:, :n_agent, :]
         srctgtattn_output, _ = self.mha_srctgt(v, state_seq, state_seq, attn_mask=prob_mask)

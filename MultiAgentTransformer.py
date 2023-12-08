@@ -125,8 +125,7 @@ class MultiAgentTransformer(nn.Module):
         if order_seq is None:
             action_vector = None
             for i in range(n_agent):
-                action_logits, order_logit = self.decoder(action_vector, order, hidden_state, ordered_state, ordered_action_mask)
-                order_prob = self.pointer(hidden_state, order_logit, order)
+                order_prob = self.pointer(hidden_state, ordered_state, order)
                 latest_prob = order_prob[:, -1, :]
                 prev_order = order
                 if deterministic:
@@ -149,8 +148,9 @@ class MultiAgentTransformer(nn.Module):
                     dim=-2,
                     index=order.unsqueeze(-1).expand(-1, -1, action_mask.shape[-1]),
                 )
+            for i in range(n_agent):
 
-                action_logits, order_logit = self.decoder(action_vector, prev_order, hidden_state, ordered_state, ordered_action_mask)
+                action_logits = self.decoder(action_vector, prev_order, hidden_state, ordered_state, ordered_action_mask)
                 latest_action_logit = action_logits[:, -1, :].unsqueeze(-2)
                 if deterministic:
                     if self.discrete:
@@ -191,8 +191,8 @@ class MultiAgentTransformer(nn.Module):
                     dim=-2,
                     index=order_seq.unsqueeze(-1).expand(-1, -1, action_mask.shape[-1]),
                 )
-            action_logits, order_logit = self.decoder(action_vector, order_seq, hidden_state, ordered_state, ordered_action_mask)
-            order_prob = self.pointer(hidden_state, order_logit, order_seq)
+            action_logits = self.decoder(action_vector, order_seq, hidden_state, ordered_state, ordered_action_mask)
+            order_prob = self.pointer(hidden_state, ordered_state, order_seq)
             order = order_seq
         
 
@@ -232,7 +232,7 @@ class MultiAgentTransformer(nn.Module):
     def update(self, batch: Transition, beta=0):
         self.train()
         # temp = random.randint(0, 1)
-        temp = "REINFORCE"
+        temp = "ppo"
         # Model forward
         _, new_action_logps, entropy, _, new_order_logprobs, order_entropy, new_values = self.get_action_and_value(
             batch.obs, action_mask=batch.action_masks, action_seq=batch.actions, order_seq=batch.orders
