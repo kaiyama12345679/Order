@@ -138,6 +138,8 @@ def main(args):
 
     num_agents = get_num_agents(data["env_name"],data["env_args"], env)
 
+    obs_dim = obs_dim + num_agents
+
     model = MultiAgentTransformer(
         data["n_dim"],
         data["n_head"],
