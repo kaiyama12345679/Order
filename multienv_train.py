@@ -127,7 +127,8 @@ def main(args):
     obs_space = env.observation_space
     action_space = env.action_space
     obs_shape = get_shape_from_obs_space(obs_space)
-    obs_dim = obs_shape[0].shape[0]
+    sample_obs, sample_share_obs, _ = env.reset()
+    obs_dim = len(sample_obs[0][0])
     if data["discrete"]:
         action_dim = action_space[0].n
     else:
@@ -137,8 +138,6 @@ def main(args):
     action_type = action_space.__class__.__name__
 
     num_agents = get_num_agents(data["env_name"],data["env_args"], env)
-
-    obs_dim = obs_dim + num_agents
 
     model = MultiAgentTransformer(
         data["n_dim"],
