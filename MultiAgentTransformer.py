@@ -29,7 +29,7 @@ class MultiAgentTransformer(nn.Module):
         huber_delta: float,
         device: torch.device,
         discrete = True,
-        use_agent_id = True
+        use_agent_id = False
     ) -> None:
         """
         Initialize MultiAgentTransformer.
