@@ -56,13 +56,13 @@ class EpisodeBuffer(object):
             (episode_length, self.n_env, self.n_agents, self.obs_dim), device=device
         )
         self.actions = torch.zeros(
-            (episode_length, self.n_env, self.n_agents, 1), device=device
+            (episode_length, self.n_env, self.n_agents, self.action_dim), device=device
         )
         self.action_masks = torch.zeros(
             (episode_length, self.n_env, self.n_agents, self.action_dim), device=device
         )
         self.action_logprobs = torch.zeros(
-            (episode_length, self.n_env, self.n_agents, 1), device=device
+            (episode_length, self.n_env, self.n_agents, self.action_dim), device=device
         )
         self.rewards = torch.zeros(
             (episode_length, self.n_env, self.n_agents, 1), device=device
