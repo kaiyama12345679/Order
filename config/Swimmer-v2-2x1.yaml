@@ -12,8 +12,8 @@ env_name: mamujoco
 train_seed: 1024
 eval_seed: 1024
 env_args:
-    scenario: HalfCheetah-v2
-    agent_conf: 6x1
+    scenario: Swimmer-v2
+    agent_conf: 2x1
     agent_obsk: 0 # We use the fully observable setting, so this argument is not useful. But we still keep it.
     episode_limit: 1000
 n_steps: 15e6
@@ -23,6 +23,6 @@ n_ppo_update: 10
 time_horizon: 100
 n_train_env: 40
 n_eval_env: 50
-map_name: HalfCheetah-v2-6x1
+map_name: Swimmer-v2-2x1
 discrete: False
 n_eval_eps: 200
