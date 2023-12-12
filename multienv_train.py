@@ -172,6 +172,10 @@ def main(args):
         eval_items = [
             "score_reward"
         ]
+    elif data["env_name"] == "pettingzoo_mpe":
+        eval_items = [
+            
+        ]
 
     def show_parameters(model):
         # count the volume of parameters of model
