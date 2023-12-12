@@ -218,6 +218,7 @@ def main(args):
                 max_batch_size,
                 device,
                 shuffle_agent_idx=data["shuffle_agent_idx"],
+                discrete=data["discrete"]
             )
             rollout_info = defaultdict(list)
             while not eps_buffer.is_full():
