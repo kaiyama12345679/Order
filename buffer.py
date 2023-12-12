@@ -70,11 +70,11 @@ class EpisodeBuffer(object):
         )
         if self.discrete:
             self.action_logprobs = torch.zeros(
-                (episode_length, self.n_env, self.n_agents, self.action_dim), device=device
+                (episode_length, self.n_env, self.n_agents, 1), device=device
             )
         else:
             self.action_logprobs = torch.zeros(
-                (episode_length, self.n_env, self.n_agents, 1), device=device
+                (episode_length, self.n_env, self.n_agents, action_dim), device=device
             )
         self.rewards = torch.zeros(
             (episode_length, self.n_env, self.n_agents, 1), device=device
