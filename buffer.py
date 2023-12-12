@@ -35,6 +35,7 @@ class EpisodeBuffer(object):
         max_batch_size,
         device,
         shuffle_agent_idx,
+        discrete=True
     ):
         self.n_env = n_env
         self.n_agents = n_agents
@@ -48,6 +49,7 @@ class EpisodeBuffer(object):
         self.max_batch_size = max_batch_size
         self.counter = 0
         self.shuffle_agent_idx = shuffle_agent_idx
+        self.discrete = discrete
 
         # Required episode_length + 1
         self.value_preds = torch.zeros(
@@ -57,15 +59,25 @@ class EpisodeBuffer(object):
         self.obs = torch.zeros(
             (episode_length, self.n_env, self.n_agents, self.obs_dim), device=device
         )
-        self.actions = torch.zeros(
-            (episode_length, self.n_env, self.n_agents, self.action_dim), device=device
-        )
+        if self.discrete:
+            self.actions = torch.zeros(
+                (episode_length, self.n_env, self.n_agents, 1), device=device
+            )
+        else:
+            self.actions = torch.zeros(
+                (episode_length, self.n_env, self.n_agents, self.action_dim), device=device
+            )
         self.action_masks = torch.zeros(
             (episode_length, self.n_env, self.n_agents, self.action_dim), device=device
         )
-        self.action_logprobs = torch.zeros(
-            (episode_length, self.n_env, self.n_agents, self.action_dim), device=device
-        )
+        if self.discrete:
+            self.action_logprobs = torch.zeros(
+                (episode_length, self.n_env, self.n_agents, 1), device=device
+            )
+        else:
+            self.action_logprobs = torch.zeros(
+                (episode_length, self.n_env, self.n_agents, self.action_dim), device=device
+            )
         self.orders = torch.zeros(
             (episode_length, self.n_env, self.n_agents, 1), device=device
         )
