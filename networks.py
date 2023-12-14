@@ -150,6 +150,15 @@ class Decoder(nn.Module):
 
         self.discrete = discrete
 
+        self.obs_bos = nn.Parameter(torch.randn(1, 1, n_dim))
+
+        self.mlp = nn.Sequential(
+            init_(nn.Linear(2 * n_dim, n_dim), activate=True),
+            nn.GELU(),
+            nn.LayerNorm(n_dim),
+            init_(nn.Linear(n_dim, n_dim)),
+        )
+
     def forward(self, action_seq, order, hidden_state, action_mask=None):
         """
         action_seq: (batch_size, seq_len)
@@ -162,23 +171,30 @@ class Decoder(nn.Module):
             action_seq = self.bos.expand(batch_size, -1, -1).to(hidden_state.device)
         order = order[:, :action_seq.shape[-2]]
         action_seq = action_seq[:, :n_agent, :]
-        one_hot_order_seq = F.one_hot(order.to(torch.int64), num_classes=n_agent)
+        concat_obs = torch.concat([self.obs_bos.expand(batch_size, -1, -1), hidden_state], dim=-2)
+
+        #one_hot_order_seq = F.one_hot(order.to(torch.int64), num_classes=n_agent)
         if self.discrete:
             one_hot_action_seq = F.one_hot(action_seq.squeeze(-1).to(torch.int64), num_classes=self.action_dim + 1)
             if self.use_action_id:
-                concat_seq = torch.cat([one_hot_action_seq.to(dtype=torch.float), one_hot_order_seq.to(dtype=torch.float)], dim=-1)
+                #concat_seq = torch.cat([one_hot_action_seq.to(dtype=torch.float), one_hot_order_seq.to(dtype=torch.float)], dim=-1)
+                pass
             else:
                 concat_seq = one_hot_action_seq
             action_embed_seq = self.decode_embed(concat_seq.float())
         else:
             if self.use_action_id:
-                concat_seq = torch.cat([action_seq, one_hot_order_seq.to(dtype=torch.float)], dim=-1)
+                #concat_seq = torch.cat([action_seq, one_hot_order_seq.to(dtype=torch.float)], dim=-1)
+                pass
             else:
                 concat_seq = action_seq
             action_embed_seq = self.decode_embed(concat_seq.float())
         action_embed_seq = self.ln(action_embed_seq)
         # pe = positional_encoding(action_embed_seq.shape[-2], action_embed_seq.shape[-1], action_embed_seq.device)
         # action_embed_seq = action_embed_seq + pe
+        action_embed_seq = torch.concat([concat_obs[:, :action_embed_seq.shape[-2], :], action_embed_seq], dim=-1)
+
+        action_embed_seq = self.mlp(action_embed_seq)
 
         for decoder in self.decoder:
             action_embed_seq = decoder(tgt=hidden_state, src=action_embed_seq)
@@ -282,28 +298,38 @@ class Pointer(nn.Module):
         
 class Transformer_Pointer(nn.Module):
     C = 10
-    def __init__(self, n_dim, n_head):
+    def __init__(self, n_dim, action_dim, n_head, discrete):
         super().__init__()
 
         self.n_dim = n_dim
         self.n_head = n_head
         self.bos = nn.Parameter(torch.randn(1, 1, n_dim))
 
-        # self.mha_self = nn.MultiheadAttention(
-        #     embed_dim=n_dim, num_heads=n_head, batch_first=True
-        # )
+        self.mha_self = nn.MultiheadAttention(
+            embed_dim=n_dim, num_heads=n_head, batch_first=True
+        )
         self.mha_srctgt = nn.MultiheadAttention(
             embed_dim=n_dim, num_heads=n_head, batch_first=True
         )
+
+        self.mlp = nn.Sequential(
+            init_(nn.Linear(n_dim + action_dim, n_dim), activate=True),
+            nn.GELU(),
+            init_(nn.Linear(n_dim, n_dim)), 
+        )
+        self.action_dim = action_dim
+        self.discrete = discrete
+        
         # Init weight
-        # init_mha_(self.mha_self)
+        init_mha_(self.mha_self)
         init_mha_(self.mha_srctgt)
 
         self.norm = nn.LayerNorm(n_dim)
+        self.norm2 = nn.LayerNorm(n_dim)
         self.Wq = init_(nn.Linear(n_dim, n_dim))
         self.Wk = init_(nn.Linear(n_dim, n_dim))
 
-    def forward(self, state_seq, ordered_seq=None, index_seq=None):
+    def forward(self, state_seq, action_seq=None, ordered_seq=None, index_seq=None):
 
         batch_size, n_agent, n_dim = state_seq.shape
         length = index_seq.shape[-1] if (index_seq is not None) else 0
@@ -320,16 +346,18 @@ class Transformer_Pointer(nn.Module):
         if ordered_seq is None:
             v = self.bos.expand(batch_size, -1, -1)
         else:
-            v = torch.concat([self.bos.expand(batch_size, -1, -1), ordered_seq], dim=-2)
+            if self.discrete:
+                action_seq = F.one_hot(action_seq.squeeze(-1).to(torch.int64), num_classes=self.action_dim).to(dtype=torch.float)
+            else:
+                action_seq = action_seq
+            obs_action = self.mlp(torch.concat([ordered_seq, action_seq], dim=-1))
+            v = torch.concat([self.bos.expand(batch_size, -1, -1), obs_action], dim=-2)
 
-        # pe = positional_encoding(v.shape[-2], n_dim, v.device)
-        # v = pe + v
+        ones = torch.ones(v.shape[1], v.shape[1]).to(v.device)
+        self_mask = torch.triu(ones, diagonal=1).bool()
 
-        # ones = torch.ones(v.shape[1], v.shape[1]).to(v.device)
-        # self_mask = torch.triu(ones, diagonal=1).bool()
-
-        # selfattn_output, _ = self.mha_self(v, v, v, attn_mask=self_mask)
-        # v = self.norm1(selfattn_output + v)
+        selfattn_output, _ = self.mha_self(v, v, v, attn_mask=self_mask)
+        v = self.norm2(selfattn_output + v)
         srctgtattn_output, _ = self.mha_srctgt(v, state_seq, state_seq, attn_mask=prob_mask)
         v = self.norm(srctgtattn_output + v)
         v = srctgtattn_output
