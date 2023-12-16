@@ -289,17 +289,17 @@ class Transformer_Pointer(nn.Module):
         self.n_head = n_head
         self.bos = nn.Parameter(torch.randn(1, 1, n_dim))
 
-        # self.mha_self = nn.MultiheadAttention(
-        #     embed_dim=n_dim, num_heads=n_head, batch_first=True
-        # )
+        self.mha_self = nn.MultiheadAttention(
+            embed_dim=n_dim, num_heads=n_head, batch_first=True
+        )
         self.mha_srctgt = nn.MultiheadAttention(
             embed_dim=n_dim, num_heads=n_head, batch_first=True
         )
-        # Init weight
-        # init_mha_(self.mha_self)
+        init_mha_(self.mha_self)
         init_mha_(self.mha_srctgt)
 
         self.norm = nn.LayerNorm(n_dim)
+        self.norm2 = nn.LayerNorm(n_dim)
         self.Wq = init_(nn.Linear(n_dim, n_dim))
         self.Wk = init_(nn.Linear(n_dim, n_dim))
 
@@ -322,14 +322,12 @@ class Transformer_Pointer(nn.Module):
         else:
             v = torch.concat([self.bos.expand(batch_size, -1, -1), ordered_seq], dim=-2)
 
-        # pe = positional_encoding(v.shape[-2], n_dim, v.device)
-        # v = pe + v
 
-        # ones = torch.ones(v.shape[1], v.shape[1]).to(v.device)
-        # self_mask = torch.triu(ones, diagonal=1).bool()
+        ones = torch.ones(v.shape[1], v.shape[1]).to(v.device)
+        self_mask = torch.triu(ones, diagonal=1).bool()
 
-        # selfattn_output, _ = self.mha_self(v, v, v, attn_mask=self_mask)
-        # v = self.norm1(selfattn_output + v)
+        selfattn_output, _ = self.mha_self(v, v, v, attn_mask=self_mask)
+        v = self.norm2(selfattn_output + v)
         srctgtattn_output, _ = self.mha_srctgt(v, state_seq, state_seq, attn_mask=prob_mask)
         v = self.norm(srctgtattn_output + v)
         v = srctgtattn_output

@@ -322,6 +322,9 @@ def main(args):
                     print(f"Early stopping in epoch {j}")
                     print(f"Target KL: {data['target_kl']:.4f}, KL: {approx_kl:.4f}")
                     break
+            for j in range(n_ppo_update):
+                batch = eps_buffer.sample(isall=True)
+                model.order_update(batch)
 
             for k, v in train_info.items():
                 v /= n_ppo_update

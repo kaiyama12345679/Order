@@ -236,7 +236,7 @@ class MultiAgentTransformer(nn.Module):
         state_seq = torch.cat([state_seq, id_vector], dim=-1)
         return state_seq
 
-    def update(self, batch: Transition, beta=0):
+    def update(self, batch: Transition):
         self.train()
         # temp = random.randint(0, 1)
         temp = "ppo"
@@ -327,31 +327,6 @@ class MultiAgentTransformer(nn.Module):
         )
         self.optimizer.step()
 
-        # Order Optimize
-        _, new_action_logps, entropy, _, new_order_logprobs, order_entropy, new_values = self.get_action_and_value(
-            batch.obs, action_mask=batch.action_masks, action_seq=batch.actions, order_seq=batch.orders
-        )
-        action_sum_ratio = torch.exp(new_action_logps.sum(dim=-2, keepdim=True) - batch.action_logprobs.sum(dim=-2, keepdim=True)).detach().clone()
-        adv = batch.advantages
-        normalized_advantages = (adv - adv.mean()) / (adv.std() + 1e-8)
-        normalized_advantages = normalized_advantages.mean(dim=-2, keepdim=True)
-        hosei_advantages = gen_clipvalue(n_agent, alpha=0, device=normalized_advantages.device, step=-1) * normalized_advantages
-        order_ratio = torch.exp(new_order_logprobs - batch.order_logprobs)
-        clips = gen_clipvalue(n_agent, alpha=0, device=normalized_advantages.device, step=1) * 0.2
-        if temp == "REINFORCE":
-            order_loss = -(new_order_logprobs * hosei_advantages).mean() - 0.05 * order_entropy.mean()
-        else:
-            order_surr1 = torch.clamp(order_ratio, 1.0 - clips, 1.0 + clips) * hosei_advantages
-            order_surr2 = order_ratio * hosei_advantages
-            order_loss = -torch.min(order_surr1, order_surr2).mean() - 0.05 * order_entropy.mean()
-
-        self.optimizer_order.zero_grad()
-        self.optimizer.zero_grad()
-        order_loss.backward()
-        grad_order_norm = nn.utils.clip_grad_norm(
-            self.pointer.parameters(), max_norm=self.max_grad_norm
-        )
-        self.optimizer_order.step()
 
         # Additional info for debugging
         # KL
@@ -381,17 +356,30 @@ class MultiAgentTransformer(nn.Module):
             explained_var,
         )
     
-    def calc_orderprob(self, prob: torch.Tensor, index: torch.Tensor):
-        batch_size, n_agent, _ = prob.shape
-        output_prob = torch.zeros((batch_size, n_agent, n_agent)).to(prob.device)
-        comp_prob = 1 - prob
-        accum_comp_prob = torch.ones((batch_size, n_agent + 1, n_agent)).to(prob.device)
-        for i in range(n_agent):
-            accum_comp_prob[:, i+1, :] = accum_comp_prob[:, i, :].clone() * comp_prob[:, i, :]
-            #accum_com_prob[i] & prob[i]
-        
-        output_prob = accum_comp_prob[: :-1, :] * prob
-        return output_prob
+    def order_update(self, batch: Transition):
+        # Order Optimize
+        _, new_action_logps, entropy, _, new_order_logprobs, order_entropy, new_values = self.get_action_and_value(
+            batch.obs, action_mask=batch.action_masks, action_seq=batch.actions, order_seq=batch.orders
+        )
+        batch_size, n_agent, _ = batch.obs.shape
+        action_sum_ratio = torch.exp(new_action_logps.sum(dim=-2, keepdim=True) - batch.action_logprobs.sum(dim=-2, keepdim=True)).detach().clone()
+        adv = batch.advantages
+        normalized_advantages = (adv - adv.mean()) / (adv.std() + 1e-8)
+        normalized_advantages = normalized_advantages.mean(dim=-2, keepdim=True)
+        hosei_advantages = gen_clipvalue(n_agent, alpha=0, device=normalized_advantages.device, step=-1) * normalized_advantages
+        order_ratio = torch.exp(new_order_logprobs - batch.order_logprobs)
+        clips = gen_clipvalue(n_agent, alpha=0, device=normalized_advantages.device, step=1) * 0.05
+        order_surr1 = torch.clamp(order_ratio, 1.0 - clips, 1.0 + clips) * hosei_advantages * action_sum_ratio.detach().clone()
+        order_surr2 = order_ratio * hosei_advantages * action_sum_ratio.detach().clone()
+        order_loss = -torch.min(order_surr1, order_surr2).mean() - 0.05 * order_entropy.mean()
+
+        self.optimizer_order.zero_grad()
+        self.optimizer.zero_grad()
+        order_loss.backward()
+        grad_order_norm = nn.utils.clip_grad_norm(
+            self.pointer.parameters(), max_norm=self.max_grad_norm
+        )
+        self.optimizer_order.step()
 
             
 
