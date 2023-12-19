@@ -293,7 +293,7 @@ class Pointer(nn.Module):
         return prob
         
 class Transformer_Pointer(nn.Module):
-    C = 10
+    C = 1
     def __init__(self, n_dim, n_head):
         super().__init__()
 
