@@ -29,7 +29,7 @@ env_args:
       - 96
       - 72
     other_config_options: ~
-n_steps: 2e6
+n_steps: 2e7
 max_grad_norm: 0.5
 huber_delta: 10.0
 n_ppo_update: 10

@@ -142,6 +142,15 @@ class Decoder(nn.Module):
             init_(nn.Linear(n_dim, action_dim)),
         )
 
+        # self.mlp = nn.Sequential(
+        #     init_(nn.Linear(2 * n_dim, n_dim), activate=True),
+        #     nn.GELU(),
+        #     nn.LayerNorm(n_dim),
+        #     init_(nn.Linear(n_dim, n_dim)),
+        # )
+
+        # self.obs_bos = nn.Parameter(torch.randn(1, 1, n_dim))
+
         if not discrete:
             self.log_std = nn.Parameter(torch.ones(action_dim))
             self.bos = nn.Parameter(torch.randn(1, 1, action_dim))
@@ -179,6 +188,9 @@ class Decoder(nn.Module):
         action_embed_seq = self.ln(action_embed_seq)
         # pe = positional_encoding(action_embed_seq.shape[-2], action_embed_seq.shape[-1], action_embed_seq.device)
         # action_embed_seq = action_embed_seq + pe
+
+        # concat_obs = torch.concat([self.obs_bos.expand(batch_size, -1, -1), hidden_state], dim=-2)
+        # action_embed_seq = self.mlp(torch.concat([concat_obs[:, :action_embed_seq.shape[-2], :], action_embed_seq], dim=-1))
 
         for decoder in self.decoder:
             action_embed_seq = decoder(tgt=hidden_state, src=action_embed_seq)

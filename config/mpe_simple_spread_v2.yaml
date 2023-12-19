@@ -7,7 +7,7 @@ tau: 0.95
 clip: 0.05
 lr: 7e-4
 eps: 1e-5
-entropy_coef: 0.001
+entropy_coef: 0.01
 env_name: pettingzoo_mpe
 train_seed: 1024
 eval_seed: 1024
@@ -18,8 +18,8 @@ n_steps: 2e7
 max_grad_norm: 0.5
 huber_delta: 10.0
 n_ppo_update: 10
-time_horizon: 25
-n_train_env: 128
+time_horizon: 200
+n_train_env: 20
 n_eval_env: 50
 map_name: simple_spread_v2
 discrete: False

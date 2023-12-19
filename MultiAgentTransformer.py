@@ -368,11 +368,10 @@ class MultiAgentTransformer(nn.Module):
         normalized_advantages = normalized_advantages.mean(dim=-2, keepdim=True)
         hosei_advantages = gen_clipvalue(n_agent, alpha=0, device=normalized_advantages.device, step=-1) * normalized_advantages
         order_ratio = torch.exp(new_order_logprobs - batch.order_logprobs)
-        clips = gen_clipvalue(n_agent, alpha=0, device=normalized_advantages.device, step=1) * 0.05
+        clips = gen_clipvalue(n_agent, alpha=0, device=normalized_advantages.device, step=1) * 0.2
         order_surr1 = torch.clamp(order_ratio, 1.0 - clips, 1.0 + clips) * hosei_advantages * action_sum_ratio.detach().clone()
         order_surr2 = order_ratio * hosei_advantages * action_sum_ratio.detach().clone()
         order_loss = -torch.min(order_surr1, order_surr2).mean() - 0.05 * order_entropy.mean()
-
         self.optimizer_order.zero_grad()
         self.optimizer.zero_grad()
         order_loss.backward()
