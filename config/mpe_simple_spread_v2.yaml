@@ -18,8 +18,8 @@ n_steps: 2e7
 max_grad_norm: 0.5
 huber_delta: 10.0
 n_ppo_update: 10
-time_horizon: 25
-n_train_env: 128
+time_horizon: 200
+n_train_env: 20
 n_eval_env: 50
 map_name: simple_spread_v2
 discrete: False
