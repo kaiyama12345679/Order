@@ -14,21 +14,9 @@ eval_seed: 1024
 env_args:
     env_name: academy_pass_and_shoot_with_keeper
     stacked: False
-    representation: simple115v2
-    rewards: scoring,checkpoints
-    write_goal_dumps: False
-    write_full_episode_dumps: False
-    render: False
-    write_video: False
-    dump_frequency: 1
-    logdir: ~
-    extra_players: ~
+    representation: raw
     number_of_left_players_agent_controls: 2 # has to be consistent with the default setting below
     number_of_right_players_agent_controls: 0
-    channel_dimensions:
-      - 96
-      - 72
-    other_config_options: ~
 n_steps: 2e7
 max_grad_norm: 0.5
 huber_delta: 10.0
