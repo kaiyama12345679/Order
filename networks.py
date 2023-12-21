@@ -109,15 +109,16 @@ class Decoder(nn.Module):
         if discrete:
             if self.use_action_id:
                 self.decode_embed = nn.Sequential(
-                    init_(nn.Linear(action_dim + 1 + n_agent, n_dim, bias=False), activate=True),
+                    init_(nn.Linear(action_dim + n_agent, n_dim, bias=False), activate=True),
                     nn.GELU(),
                 )
             else:
                 self.decode_embed = nn.Sequential(
-                init_(nn.Linear(action_dim + 1, n_dim, bias=False), activate=True),
+                init_(nn.Linear(action_dim, n_dim, bias=False), activate=True),
                 nn.GELU(),
             )
         else:
+            self.log_std = nn.Parameter(torch.ones(action_dim))
             if self.use_action_id:
                 self.decode_embed = nn.Sequential(
                     init_(nn.Linear(action_dim + n_agent, n_dim, bias=False), activate=True),
@@ -132,7 +133,7 @@ class Decoder(nn.Module):
         self.ln = nn.LayerNorm(n_dim)
 
         self.decoder = nn.ModuleList(
-            [DecoderBlock(n_dim, n_head) for _ in range(num_decoder_layer)]
+            [EncoderBlock(n_dim, n_head=n_head, is_causal=True) for _ in range(2)]
         )
 
         self.mlp_decoder = nn.Sequential(
@@ -151,11 +152,7 @@ class Decoder(nn.Module):
 
         # self.obs_bos = nn.Parameter(torch.randn(1, 1, n_dim))
 
-        if not discrete:
-            self.log_std = nn.Parameter(torch.ones(action_dim))
-            self.bos = nn.Parameter(torch.randn(1, 1, action_dim))
-        else:
-            self.bos = torch.full((1, 1, 1), action_dim)
+        self.pe = nn.Embedding(n_agent, n_dim)
 
         self.discrete = discrete
 
@@ -165,27 +162,21 @@ class Decoder(nn.Module):
         hidden_state: (batch_size, seq_len, n_dim)
         """
         batch_size, n_agent, n_dim = hidden_state.shape
+        pe = self.pe(torch.arange(n_agent, device=hidden_state.device)).unsqueeze(0).expand(batch_size, -1, -1)
         if action_seq is not None:
-            action_seq = torch.concat([self.bos.expand(batch_size, -1, -1).to(hidden_state.device), action_seq], dim=-2)
+            action_seq = action_seq[:, :n_agent - 1, :]
+            if self.discrete:
+                action_seq = F.one_hot(action_seq.squeeze(-1).to(torch.int64), num_classes=self.action_dim + 1).to(dtype=torch.float)
+            action_embed_seq = self.decode_embed(action_seq.float())
+            action_embed_seq = self.ln(action_embed_seq)
+            hidden_state = hidden_state[:, :action_embed_seq.shape[-2] + 1, :] + pe[:, :action_embed_seq.shape[-2] + 1, :]
+            action_embed_seq = action_embed_seq + pe[:, :action_embed_seq.shape[-2], :]
+            net_inputs = torch.zeros(batch_size, 2 * action_embed_seq.shape[-2] + 1, n_dim).to(action_embed_seq.device)
+            net_inputs[:, 0::2, :] = hidden_state.clone()
+            net_inputs[:, 1::2, :] = action_embed_seq.clone()
         else:
-            action_seq = self.bos.expand(batch_size, -1, -1).to(hidden_state.device)
-        order = order[:, :action_seq.shape[-2]]
-        action_seq = action_seq[:, :n_agent, :]
-        one_hot_order_seq = F.one_hot(order.to(torch.int64), num_classes=n_agent)
-        if self.discrete:
-            one_hot_action_seq = F.one_hot(action_seq.squeeze(-1).to(torch.int64), num_classes=self.action_dim + 1)
-            if self.use_action_id:
-                concat_seq = torch.cat([one_hot_action_seq.to(dtype=torch.float), one_hot_order_seq.to(dtype=torch.float)], dim=-1)
-            else:
-                concat_seq = one_hot_action_seq
-            action_embed_seq = self.decode_embed(concat_seq.float())
-        else:
-            if self.use_action_id:
-                concat_seq = torch.cat([action_seq, one_hot_order_seq.to(dtype=torch.float)], dim=-1)
-            else:
-                concat_seq = action_seq
-            action_embed_seq = self.decode_embed(concat_seq.float())
-        action_embed_seq = self.ln(action_embed_seq)
+            hidden_state = hidden_state[:, :1, :] + pe[:, :1, :]
+            net_inputs = hidden_state.clone()
         # pe = positional_encoding(action_embed_seq.shape[-2], action_embed_seq.shape[-1], action_embed_seq.device)
         # action_embed_seq = action_embed_seq + pe
 
@@ -193,10 +184,10 @@ class Decoder(nn.Module):
         # action_embed_seq = self.mlp(torch.concat([concat_obs[:, :action_embed_seq.shape[-2], :], action_embed_seq], dim=-1))
 
         for decoder in self.decoder:
-            action_embed_seq = decoder(tgt=hidden_state, src=action_embed_seq)
-        action_logit = self.mlp_decoder(action_embed_seq)
+            net_inputs = decoder(net_inputs)
+        action_logit = self.mlp_decoder(net_inputs[:, 0::2, :])
         if action_mask is not None:
-            action_logit = action_logit + (1 - action_mask) * (-1e9)
+            action_logit = action_logit + (1 - action_mask[:, :action_logit.shape[-2], :]) * (-1e9)
 
         return action_logit
 
