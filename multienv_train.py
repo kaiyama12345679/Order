@@ -296,34 +296,35 @@ def main(args):
                 "explained_var": 0,
             }
 
+            batches = eps_buffer.sample(num_minibatch=data["num_minibatch"])
             for j in range(n_ppo_update):
-                batch = eps_buffer.sample(isall=True)
-                (
-                    critic_loss,
-                    policy_loss,
-                    grad_norm,
-                    entropy,
-                    ratio,
-                    approx_kl,
-                    clip_frac,
-                    explained_var,
-                ) = model.update(batch)
-                train_info["value_loss"] += critic_loss.item()
-                train_info["policy_loss"] += policy_loss.item()
-                train_info["grad_norm"] += grad_norm
-                train_info["entropy"] += entropy.item()
-                train_info["ratio"] += ratio.mean()
-                train_info["approx_kl"] += approx_kl
-                train_info["clip_frac"] += clip_frac
-                train_info["explained_var"] += explained_var
+                for batch in batches:
+                    (
+                        critic_loss,
+                        policy_loss,
+                        grad_norm,
+                        entropy,
+                        ratio,
+                        approx_kl,
+                        clip_frac,
+                        explained_var,
+                    ) = model.update(batch)
+                    train_info["value_loss"] += critic_loss.item()
+                    train_info["policy_loss"] += policy_loss.item()
+                    train_info["grad_norm"] += grad_norm
+                    train_info["entropy"] += entropy.item()
+                    train_info["ratio"] += ratio.mean()
+                    train_info["approx_kl"] += approx_kl
+                    train_info["clip_frac"] += clip_frac
+                    train_info["explained_var"] += explained_var
 
-                if "target_kl" in data and approx_kl > data["target_kl"]:
-                    print(f"Early stopping in epoch {j}")
-                    print(f"Target KL: {data['target_kl']:.4f}, KL: {approx_kl:.4f}")
-                    break
+                    if "target_kl" in data and approx_kl > data["target_kl"]:
+                        print(f"Early stopping in epoch {j}")
+                        print(f"Target KL: {data['target_kl']:.4f}, KL: {approx_kl:.4f}")
+                        break
 
             for k, v in train_info.items():
-                v /= n_ppo_update
+                v /= (n_ppo_update * data["num_minibatch"])
                 if not debug:
                     writer.add_scalar(f"train/{k}", v, update * n_train_env * time_horizon)
 
