@@ -170,7 +170,7 @@ class EpisodeBuffer(object):
             else:
                 self.returns[t] = gae + self.value_preds[t]
 
-    def sample(self, isall=False):
+    def sample(self, num_minibatch=1):
         # Reshape
         # (n_episode, n_env, n_agent, dim) -> (n_episode * n_env, n_agent, dim)
         value_preds = self.value_preds[:-1].reshape(
@@ -207,12 +207,10 @@ class EpisodeBuffer(object):
         )
 
         total_num = len(obs)
-        if isall:
-            sample_num = total_num
-        else:
-            sample_num = min(total_num, self.max_batch_size)
 
-        sample_indices = random.sample(range(total_num), sample_num)
+        minibatch_size = (self.episode_length * self.n_env) // num_minibatch
+        rand = torch.randperm(self.episode_length * self.n_env)
+        sample_indices = [rand[i * minibatch_size:(i + 1) * minibatch_size] for i in range(num_minibatch)]
 
         if self.shuffle_agent_idx:
             agent_indices = random.sample(range(self.n_agents), self.n_agents)
@@ -231,18 +229,18 @@ class EpisodeBuffer(object):
                 returns[sample_indices][:, agent_indices],
             )
         else:
-            batch = Transition(
-                obs[sample_indices],
-                value_preds[sample_indices],
-                actions[sample_indices],
-                action_masks[sample_indices],
-                action_logprobs[sample_indices],
-                orders[sample_indices],
-                order_logprobs[sample_indices],
-                rewards[sample_indices],
-                dones[sample_indices],
-                active_masks[sample_indices],
-                advantages[sample_indices],
-                returns[sample_indices],
-            )
+            batch = [Transition(
+                obs[sample_indice],
+                value_preds[sample_indice],
+                actions[sample_indice],
+                action_masks[sample_indice],
+                action_logprobs[sample_indice],
+                orders[sample_indice],
+                order_logprobs[sample_indice],
+                rewards[sample_indice],
+                dones[sample_indice],
+                active_masks[sample_indice],
+                advantages[sample_indice],
+                returns[sample_indice],
+            ) for sample_indice in sample_indices]
         return batch
