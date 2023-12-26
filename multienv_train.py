@@ -327,7 +327,7 @@ def main(args):
                     model.order_update(batch)
 
             for k, v in train_info.items():
-                v /= n_ppo_update * ((n_train_env * time_horizon) // data["num_minibatch"])
+                v /= n_ppo_update * (data["num_minibatch"])
                 if not debug:
                     writer.add_scalar(f"train/{k}", v, update * n_train_env * time_horizon)
 
