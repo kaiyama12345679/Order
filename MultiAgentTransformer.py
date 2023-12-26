@@ -376,7 +376,7 @@ class MultiAgentTransformer(nn.Module):
             batch.obs, action_mask=batch.action_masks, action_seq=batch.actions, order_seq=batch.orders
         )
         batch_size, n_agent, _ = batch.obs.shape
-        action_sum_ratio = torch.exp(new_action_logps.sum(dim=-2, keepdim=True) - batch.action_logprobs.sum(dim=-2, keepdim=True)).detach().clone()
+        action_sum_ratio = torch.exp(new_action_logps.sum(dim=(-1, -2), keepdim=True) - batch.action_logprobs.sum(dim=(-1, -2), keepdim=True)).detach().clone()
         adv = batch.advantages
         normalized_advantages = (adv - adv.mean()) / (adv.std() + 1e-8)
         normalized_advantages = normalized_advantages.mean(dim=-2, keepdim=True)
