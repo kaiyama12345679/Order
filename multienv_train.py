@@ -90,9 +90,9 @@ def main(args):
     n_train_env = data["n_train_env"]
     n_eval_episodes = int(data["n_eval_eps"])
 
-    if not "target_kl" in data:
-        # Default target kl for early stopping
-        data["target_kl"] = 0.01
+    # if not "target_kl" in data:
+    #     # Default target kl for early stopping
+    #     data["target_kl"] = 0.01
 
     if not "shuffle_agent_idx" in data:
         data["shuffle_agent_idx"] = False
