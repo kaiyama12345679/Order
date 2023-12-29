@@ -111,6 +111,7 @@ def main(args):
             name=run_name + save_path,
             save_code=True,
         )
+        wandb.run.log_code(".")
     # Summary writer
     save_dir = "models/" + save_path + f"/{run_name}/"
     if os.path.exists(save_dir):
