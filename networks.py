@@ -150,6 +150,15 @@ class Decoder(nn.Module):
 
         self.discrete = discrete
 
+        # self.mlp = nn.Sequential(
+        #     init_(nn.Linear(2 * n_dim, n_dim), activate=True),
+        #     nn.GELU(),
+        #     nn.LayerNorm(n_dim),
+        #     init_(nn.Linear(n_dim, n_dim)),
+        # )
+
+        # self.obs_bos = nn.Parameter(torch.randn(1, 1, n_dim))
+
     def forward(self, action_seq, order, hidden_state, action_mask=None):
         """
         action_seq: (batch_size, seq_len)
@@ -177,6 +186,9 @@ class Decoder(nn.Module):
                 concat_seq = action_seq
             action_embed_seq = self.decode_embed(concat_seq.float())
         action_embed_seq = self.ln(action_embed_seq)
+
+        # concat_obs = torch.concat([self.obs_bos.expand(batch_size, -1, -1), hidden_state], dim=-2)
+        # action_embed_seq = self.mlp(torch.concat([concat_obs[:, :action_embed_seq.shape[-2], :], action_embed_seq], dim=-1))
 
         for decoder in self.decoder:
             action_embed_seq = decoder(tgt=hidden_state, src=action_embed_seq)
