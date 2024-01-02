@@ -177,6 +177,13 @@ class MultiAgentTransformer(nn.Module):
             order_prob = self.pointer(hidden_state2, ordered_state2[:, :-1, :], index_seq=order_seq[:, :-1])
             order = order_seq
         
+        #for eval
+        # order = torch.stack([torch.arange(n_agent) for _ in range(n_env)]).to(self.device)
+        # ordered_state = torch.gather(
+        #     hidden_state,
+        #     dim=-2,
+        #     index=order.unsqueeze(-1).expand(-1, -1, hidden_state.shape[-1]),
+        # )
 
         ordered_enc_state = ordered_state
 
@@ -386,8 +393,8 @@ class MultiAgentTransformer(nn.Module):
         hosei_advantages = gen_clipvalue(n_agent, alpha=0, device=normalized_advantages.device, step=-1) * normalized_advantages
         order_ratio = torch.exp(new_order_logprobs - batch.order_logprobs)
         clips = gen_clipvalue(n_agent, alpha=0, device=normalized_advantages.device, step=1) * 0.2
-        order_surr1 = torch.clamp(order_ratio, 1.0 - clips, 1.0 + clips) * hosei_advantages * action_sum_ratio.detach().clone()
-        order_surr2 = order_ratio * hosei_advantages * action_sum_ratio.detach().clone()
+        order_surr1 = torch.clamp(order_ratio, 1.0 - clips, 1.0 + clips) * hosei_advantages
+        order_surr2 = order_ratio * hosei_advantages
         order_loss = -torch.min(order_surr1, order_surr2).mean() - 0.001 * order_entropy.mean()
         #order_loss = -(hosei_advantages * new_order_logprobs).mean()
         self.optimizer_order.zero_grad()
